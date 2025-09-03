@@ -25,16 +25,13 @@ const int INF = 0x3f3f3f3f;
 
 int sv() {
 
-
     return 0;
 }
-
 
 signed main() {
 #ifdef __LOCAL
     freopen("in.txt", "r", stdin);
 #endif
-
 
     ios::sync_with_stdio(0);
     cin.tie(0);
