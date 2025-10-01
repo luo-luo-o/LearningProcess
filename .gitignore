@@ -4,3 +4,5 @@ in.txt
 out.txt
 
 cmake-build-debug/
+.idea/
+.vscode/
