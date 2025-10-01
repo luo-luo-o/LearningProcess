@@ -4,8 +4,7 @@ project(LearningProcess)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(
-        luogu/P5076.cpp
-        luogu/test.cpp
-)
+
+# 设置可执行文件的输出目录为 ACM/output
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/ACM/output)
 
