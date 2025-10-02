@@ -325,7 +325,7 @@
             <wLevel>2</wLevel>
             <uThumb>0</uThumb>
             <uSurpInc>0</uSurpInc>
-            <uC99>0</uC99>
+            <uC99>1</uC99>
             <uGnu>0</uGnu>
             <useXO>0</useXO>
             <v6Lang>3</v6Lang>
@@ -651,6 +651,21 @@
           </Files>
         </Group>
         <Group>
+          <GroupName>SYSTEM</GroupName>
+          <Files>
+            <File>
+              <FileName>Delay.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\SYSTEM\Delay.c</FilePath>
+            </File>
+            <File>
+              <FileName>Delay.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\SYSTEM\Delay.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
           <GroupName>USER</GroupName>
           <Files>
             <File>
@@ -674,29 +689,14 @@
               <FilePath>.\USER\stm32f10x_it.h</FilePath>
             </File>
             <File>
-              <FileName>luoluoLIB_stm32f103.c</FileName>
+              <FileName>luoluo_LIB_stm32f10x.c</FileName>
               <FileType>1</FileType>
-              <FilePath>.\USER\luoluoLIB_stm32f103.c</FilePath>
+              <FilePath>.\USER\luoluo_LIB_stm32f10x.c</FilePath>
             </File>
             <File>
-              <FileName>luoluoLIB_stm32f103.h</FileName>
+              <FileName>luoluo_LIB_stm32f10x.h</FileName>
               <FileType>5</FileType>
-              <FilePath>.\USER\luoluoLIB_stm32f103.h</FilePath>
-            </File>
-          </Files>
-        </Group>
-        <Group>
-          <GroupName>SYSTEM</GroupName>
-          <Files>
-            <File>
-              <FileName>Delay.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>.\SYSTEM\Delay.c</FilePath>
-            </File>
-            <File>
-              <FileName>Delay.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>.\SYSTEM\Delay.h</FilePath>
+              <FilePath>.\USER\luoluo_LIB_stm32f10x.h</FilePath>
             </File>
           </Files>
         </Group>
