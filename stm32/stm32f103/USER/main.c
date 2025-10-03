@@ -1,7 +1,5 @@
 /*  Include Modules  */
 #include "stm32f10x.h"
-#include "stm32f10x_it.h" // 包含中断处理函数的声明
-#include "stm32f10x_rcc.h"
 
 #include "luoluo_LIB_stm32f10x.h"
 
@@ -10,7 +8,9 @@
 /*  Defines  */
 
 #define GPIO_Pin_(num) (1 << num)
+#define LED_PORT GPIOA
 #define LED_PINs GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7
+#define KEY_PORT GPIOA
 #define KEY_PIN GPIO_Pin_8
 
 /*  End of Defines  */
@@ -35,18 +35,18 @@ void GPIO_Config()
 	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;  // GPIO模式，赋值为推挽输出模式
 	GPIO_InitStructure.GPIO_Pin = LED_PINs;			  // GPIO引脚
 	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz; // GPIO速度，赋值为50MHz
-	GPIO_Init(GPIOA, &GPIO_InitStructure);			  // 实现GPIOA的初始化
+	GPIO_Init(LED_PORT, &GPIO_InitStructure);			  // 实现LED_PORT的初始化
 
 	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU; // GPIO模式，赋值为上拉输入模式
 	GPIO_InitStructure.GPIO_Pin = KEY_PIN;
-	GPIO_Init(GPIOA, &GPIO_InitStructure); // 实现GPIOA的初始化
+	GPIO_Init(LED_PORT, &GPIO_InitStructure); // 实现LED_PORT的初始化
 
 	GPIO_EXTILineConfig(GPIO_PortSourceGPIOA, GPIO_PinSource8); // 选择GPIOA的第8脚作为外部中断源
 
 	EXTI_InitTypeDef EXTI_InitStructure;					// 定义结构体变量
 	EXTI_InitStructure.EXTI_Line = EXTI_Line8;				// 选择外部中断线
 	EXTI_InitStructure.EXTI_Mode = EXTI_Mode_Interrupt;		// 设置为中断模式
-	EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Falling; // 下降沿触发
+	EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Rising_Falling; // 下降沿触发
 	EXTI_InitStructure.EXTI_LineCmd = ENABLE;				// 使能外部中断线
 	EXTI_Init(&EXTI_InitStructure);							// 实现外部中断线的初始化
 
@@ -114,9 +114,9 @@ void SystemClock_Config(void)
 uint8_t Key_GetState(uint8_t KEY)
 {
 	// 读取引脚状态，消抖处理
-	uint8_t state1 = GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_(KEY));
+	uint8_t state1 = GPIO_ReadInputDataBit(KEY_PORT, GPIO_Pin_(KEY));
 	Delay_ms_Blocking(10); // 简易消抖
-	uint8_t state2 = GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_(KEY));
+	uint8_t state2 = GPIO_ReadInputDataBit(KEY_PORT, GPIO_Pin_(KEY));
 
 	// 两次读取都为低电平才认为按键按下
 	return (state1 == 0 && state2 == 0) ? 1 : 0;
@@ -137,11 +137,11 @@ uint16_t LED_PIN;
 
 void LED_ON(void)
 {
-	GPIO_WriteBit(GPIOA, GPIO_Pin_(LED_PIN), Bit_SET);
+	GPIO_WriteBit(LED_PORT, GPIO_Pin_(LED_PIN), Bit_SET);
 }
 void LED_OFF(void)
 {
-	GPIO_WriteBit(GPIOA, GPIO_Pin_(LED_PIN), Bit_RESET);
+	GPIO_WriteBit(LED_PORT, GPIO_Pin_(LED_PIN), Bit_RESET);
 }
 void LED_Process(void)
 {

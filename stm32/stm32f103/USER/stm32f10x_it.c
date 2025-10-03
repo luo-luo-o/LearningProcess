@@ -158,8 +158,10 @@ void EXTI9_5_IRQHandler(void)
 	if (EXTI_GetITStatus(EXTI_Line8) != RESET) // 检测是否为按键引脚触发的中断
 	{
 		// TO DO
-		reverse = !reverse; // 切换方向标志位
-    Delay_ms_Blocking(20);
+    // 读取按键引脚电平状态
+    uint8_t key_state = GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_8); // 按住为0，松开为1
+    reverse = (key_state == 0) ? 1 : 0;
+    Delay_ms_Blocking(10); // 简易消抖
 
 		// 清除中断标志位
 		EXTI_ClearITPendingBit(EXTI_Line8);
