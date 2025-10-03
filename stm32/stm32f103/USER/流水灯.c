@@ -5,6 +5,8 @@
 
 /*  Defines  */
 #define GPIO_Pin_(num) (1 << num)
+uint16_t reverse = 0;
+
 /*  End of Defines  */
 
 /*  Inits  */
@@ -37,7 +39,7 @@ uint8_t Key_GetState(uint8_t KEY_PIN)
 {
 	// 读取引脚状态，消抖处理
 	uint8_t state1 = GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_(KEY_PIN));
-	Delay_ms(10); // 简易消抖
+	Delay_ms_Blocking(10); // 简易消抖
 	uint8_t state2 = GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_(KEY_PIN));
 
 	// 两次读取都为低电平才认为按键按下
@@ -51,7 +53,6 @@ int main(void)
 
 	GPIO_Config();
 
-	uint16_t reverse = 0;
 	uint16_t LED_PIN = 0;
 	if (Key_GetState(8)) // 如果有按键按下
 	{
@@ -63,7 +64,7 @@ int main(void)
 
 		// 点亮当前LED
 		GPIO_WriteBit(GPIOA, GPIO_Pin_(LED_PIN), Bit_SET);
-		Delay_ms(100);
+		Delay_ms_Blocking(100);
 		// 熄灭当前LED
 		GPIO_WriteBit(GPIOA, GPIO_Pin_(LED_PIN), Bit_RESET);
 

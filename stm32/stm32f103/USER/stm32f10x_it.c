@@ -23,6 +23,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f10x_it.h"
+#include "Delay.h"
 
 /** @addtogroup STM32F10x_StdPeriph_Template
   * @{
@@ -134,6 +135,8 @@ void PendSV_Handler(void)
   */
 void SysTick_Handler(void)
 {
+  extern uint64_t g_total_us;
+  g_total_us++;
 }
 
 /******************************************************************************/
@@ -144,17 +147,24 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
-  * @brief  This function handles PPP interrupt request.
-  * @param  None
-  * @retval None
-  */
-/*void PPP_IRQHandler(void)
+ * @brief   EXTI9_5中断服务函数
+ * @param   无
+ * @return  无
+ */
+void EXTI9_5_IRQHandler(void)
 {
-}*/
+  extern uint8_t reverse; // 外部声明方向标志位变量
 
-/**
-  * @}
-  */ 
+	if (EXTI_GetITStatus(EXTI_Line8) != RESET) // 检测是否为按键引脚触发的中断
+	{
+		// TO DO
+		reverse = !reverse; // 切换方向标志位
+    Delay_ms_Blocking(20);
+
+		// 清除中断标志位
+		EXTI_ClearITPendingBit(EXTI_Line8);
+	}
+}
 
 
 /******************* (C) COPYRIGHT 2011 STMicroelectronics *****END OF FILE****/
