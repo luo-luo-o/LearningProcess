@@ -21,7 +21,7 @@ int sv() {
 
 signed main() {
 #ifdef __LOCAL
-    freopen("in.txt", "r", stdin);
+    freopen("..\\in.txt", "r", stdin);
 #endif
 
     ios::sync_with_stdio(0);

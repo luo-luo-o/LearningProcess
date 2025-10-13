@@ -181,7 +181,7 @@ int sv() {  // 菜鸡没做出来QAQ
 
 signed main() {
 #ifdef __LOCAL
-    if (freopen("in.txt", "r", stdin) == nullptr) {
+    if (freopen("..\\in.txt", "r", stdin) == nullptr) {
         cout << "File Error!! \"in.txt\" cannot found!!" << endl;
         return 1;
     }
