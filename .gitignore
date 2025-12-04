@@ -1,4 +1,6 @@
 ACM/*/*.exe
+build/
+bin/
 
 in.txt
 out.txt
@@ -6,5 +8,6 @@ out.txt
 cmake-build-debug/
 .idea/
 .vscode/
+.cph/
 
 *.zip
