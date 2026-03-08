@@ -66,3 +66,17 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 
     # Add user defined libraries
 )
+
+# 1. 定义输出文件的路径和名称
+set(HEX_FILE ${PROJECT_BINARY_DIR}/${PROJECT_NAME}.hex)
+set(BIN_FILE ${PROJECT_BINARY_DIR}/${PROJECT_NAME}.bin)
+
+# 2. 添加自定义命令：在编译完成后（POST_BUILD）调用 objcopy 
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:${PROJECT_NAME}> ${HEX_FILE}
+    COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${PROJECT_NAME}> ${BIN_FILE}
+    COMMENT "正在转换格式: 生成 HEX 和 BIN 文件..."
+)
+
+# 3. 打印生成路径，方便你在资源管理器中找到它
+message(STATUS "HEX 文件将生成至: ${HEX_FILE}")
