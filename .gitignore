@@ -1,3 +1,6 @@
+.vscode/
+build/
+
 *.hcl*
 Project Backups/
 *.pdsprj
