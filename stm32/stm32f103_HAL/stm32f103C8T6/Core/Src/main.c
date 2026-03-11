@@ -25,8 +25,6 @@
 
 #include "OLED.h"
 #include "CAN.h"
-#include "stm32f1xx_hal.h"
-#include <string.h>
 
 /* USER CODE END Includes */
 
@@ -57,6 +55,8 @@ I2C_HandleTypeDef hi2c2;
 
 static CAN_RxHeaderTypeDef RxHeader;
 static uint8_t RxData[8];
+
+char global_buffer[64]; // 用于存储格式化字符串的全局缓冲区
 
 /* USER CODE END PV */
 
@@ -109,7 +109,7 @@ int main(void)
   OLED_Init();
   CAN_Init();
 
-  uint8_t count = 0; // 计数变量
+  uint32_t count = 0; // 计数变量
 
   /* USER CODE END 2 */
 
@@ -117,7 +117,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, LED_ON);
+    // HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, LED_ON);
 
     static uint32_t can_send_tick = 0;
     uint8_t msg1[8] = {'H', 'e', 'l', 'l', 'o', ' ', 'C', 'A'};
@@ -126,8 +126,8 @@ int main(void)
 
     if (HAL_GetTick() - can_send_tick >= 0)
     {
-      CAN_Send_Msg(0x123, msg1, 8); // 发送第一帧
-      CAN_Send_Msg(0x123, msg2, 2); // 发送第二帧
+      // CAN_Send_Msg(0x123, msg1, 8); // 发送第一帧
+      // CAN_Send_Msg(0x123, msg2, 2); // 发送第二帧
       CAN_Send_Msg(0x125, msg3, 7); // 发送第三帧
       CAN_Send_Num(0x125, count); // 发送计数值
 
@@ -314,12 +314,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     temp[len] = '\0'; // 确保字符串结尾
 
     if (RxHeader.StdId == 0x123) {
-      if (RxHeader.DLC == 8) {
-        OLED_ShowString(1, 1, "CAN Recv:");
-        OLED_ShowString(2, 1, temp); // 显示第一帧内容
-      } else if (RxHeader.DLC == 2) {
-        OLED_ShowString(2, 9, temp); // 显示第二帧内容
-      }
+      // if (RxHeader.DLC == 8) {
+      //   OLED_ShowString(1, 1, "CAN Recv:");
+      //   OLED_ShowString(2, 1, temp); // 显示第一帧内容
+      // } else if (RxHeader.DLC == 2) {
+      //   OLED_ShowString(2, 9, temp); // 显示第二帧内容
+      // }
     } else if (RxHeader.StdId == 0x125) {
       if (RxHeader.DLC == 7) {  
        OLED_ShowString(3, 1, temp); // 显示第三帧内容

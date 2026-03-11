@@ -66,9 +66,16 @@ HAL_StatusTypeDef CAN_Send_String(uint32_t id, const char *str)
   */
 HAL_StatusTypeDef CAN_Send_Num(uint32_t id, uint32_t num)
 {
-  uint8_t i;
+  uint8_t i = 0;
   uint8_t rdata[8] = {0};
   uint8_t data[8] = {0};
+
+  // 特殊处理数字 0
+  if (num == 0)
+  {
+    data[0] = '0';
+    return CAN_Send_Msg(id, data, 1);
+  }
 
   while(num > 0 && i < 8)
   {
