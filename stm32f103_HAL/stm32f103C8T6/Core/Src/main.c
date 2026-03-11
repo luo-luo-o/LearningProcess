@@ -22,9 +22,11 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdbool.h>
+
 #include "OLED.h"
-#include "function_defines.h"
+#include "CAN.h"
+#include "stm32f1xx_hal.h"
+#include <string.h>
 
 /* USER CODE END Includes */
 
@@ -47,17 +49,22 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-I2C_HandleTypeDef hi2c1;
+CAN_HandleTypeDef hcan;
+
+I2C_HandleTypeDef hi2c2;
 
 /* USER CODE BEGIN PV */
-bool oled_show = false;
+
+static CAN_RxHeaderTypeDef RxHeader;
+static uint8_t RxData[8];
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_I2C1_Init(void);
+static void MX_CAN_Init(void);
+static void MX_I2C2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -75,7 +82,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  bool last_state = true;
 
   /* USER CODE END 1 */
 
@@ -97,29 +103,37 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_I2C1_Init();
+  MX_CAN_Init();
+  MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
   OLED_Init();
+  CAN_Init();
+
+  uint8_t count = 0; // 计数变量
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1) 
+  while (1)
   {
-    // 异步闪烁 LED，不产生阻塞
-    static uint32_t led_tick = 0;
-    RUN_EVERY_MS(led_tick, 200, {
-      HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_2);
-    });
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, LED_ON);
 
-    if (oled_show != last_state) {
-      if (oled_show) {
-        OLED_ShowString(1, 1, "Hello, World!");
-        OLED_ShowString(2, 1, "STM32F103C8T6");
-      } else {
-        OLED_Clear();
-      }
-      last_state = oled_show;
+    static uint32_t can_send_tick = 0;
+    uint8_t msg1[8] = {'H', 'e', 'l', 'l', 'o', ' ', 'C', 'A'};
+    uint8_t msg2[8] = {'N', '!', 0, 0, 0, 0, 0, 0};
+    uint8_t msg3[8] = {'C', 'O', 'U', 'N', 'T', ':', ' '}; // 用于显示计数值
+
+    if (HAL_GetTick() - can_send_tick >= 0)
+    {
+      CAN_Send_Msg(0x123, msg1, 8); // 发送第一帧
+      CAN_Send_Msg(0x123, msg2, 2); // 发送第二帧
+      CAN_Send_Msg(0x125, msg3, 7); // 发送第三帧
+      CAN_Send_Num(0x125, count); // 发送计数值
+
+      count++;
+
+      can_send_tick = HAL_GetTick();
     }
 
     /* USER CODE END WHILE */
@@ -169,36 +183,73 @@ void SystemClock_Config(void)
 }
 
 /**
-  * @brief I2C1 Initialization Function
+  * @brief CAN Initialization Function
   * @param None
   * @retval None
   */
-static void MX_I2C1_Init(void)
+static void MX_CAN_Init(void)
 {
 
-  /* USER CODE BEGIN I2C1_Init 0 */
+  /* USER CODE BEGIN CAN_Init 0 */
 
-  /* USER CODE END I2C1_Init 0 */
+  /* USER CODE END CAN_Init 0 */
 
-  /* USER CODE BEGIN I2C1_Init 1 */
+  /* USER CODE BEGIN CAN_Init 1 */
 
-  /* USER CODE END I2C1_Init 1 */
-  hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 400000;
-  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
-  hi2c1.Init.OwnAddress1 = 0;
-  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c1.Init.OwnAddress2 = 0;
-  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  /* USER CODE END CAN_Init 1 */
+  hcan.Instance = CAN1;
+  hcan.Init.Prescaler = 4;
+  hcan.Init.Mode = CAN_MODE_LOOPBACK;
+  hcan.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan.Init.TimeSeg1 = CAN_BS1_13TQ;
+  hcan.Init.TimeSeg2 = CAN_BS2_4TQ;
+  hcan.Init.TimeTriggeredMode = DISABLE;
+  hcan.Init.AutoBusOff = DISABLE;
+  hcan.Init.AutoWakeUp = DISABLE;
+  hcan.Init.AutoRetransmission = ENABLE;
+  hcan.Init.ReceiveFifoLocked = DISABLE;
+  hcan.Init.TransmitFifoPriority = DISABLE;
+  if (HAL_CAN_Init(&hcan) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN I2C1_Init 2 */
+  /* USER CODE BEGIN CAN_Init 2 */
 
-  /* USER CODE END I2C1_Init 2 */
+  /* USER CODE END CAN_Init 2 */
+
+}
+
+/**
+  * @brief I2C2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C2_Init(void)
+{
+
+  /* USER CODE BEGIN I2C2_Init 0 */
+
+  /* USER CODE END I2C2_Init 0 */
+
+  /* USER CODE BEGIN I2C2_Init 1 */
+
+  /* USER CODE END I2C2_Init 1 */
+  hi2c2.Instance = I2C2;
+  hi2c2.Init.ClockSpeed = 400000;
+  hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
+  hi2c2.Init.OwnAddress1 = 0;
+  hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c2.Init.OwnAddress2 = 0;
+  hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C2_Init 2 */
+
+  /* USER CODE END I2C2_Init 2 */
 
 }
 
@@ -236,7 +287,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 1, 0);
   HAL_NVIC_EnableIRQ(EXTI0_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -249,7 +300,34 @@ static void MX_GPIO_Init(void)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   if (GPIO_Pin == GPIO_PIN_0) {
-    oled_show = !oled_show;
+    OLED_ShowString(1, 1, "OLED Test!!");
+  }
+}
+
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+  if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK)
+  {
+    char temp[9] = {0};
+    uint8_t len = RxHeader.DLC;
+    memcpy(temp, RxData, len);
+    temp[len] = '\0'; // 确保字符串结尾
+
+    if (RxHeader.StdId == 0x123) {
+      if (RxHeader.DLC == 8) {
+        OLED_ShowString(1, 1, "CAN Recv:");
+        OLED_ShowString(2, 1, temp); // 显示第一帧内容
+      } else if (RxHeader.DLC == 2) {
+        OLED_ShowString(2, 9, temp); // 显示第二帧内容
+      }
+    } else if (RxHeader.StdId == 0x125) {
+      if (RxHeader.DLC == 7) {  
+       OLED_ShowString(3, 1, temp); // 显示第三帧内容
+      }
+      else {
+        OLED_ShowString(3, 8, temp); // 显示第三帧内容
+      }
+    }
   }
 }
 
@@ -265,6 +343,10 @@ void Error_Handler(void)
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1) {
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, LED_ON);
+    HAL_Delay(100);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, LED_OFF);
+    HAL_Delay(100);
   }
   /* USER CODE END Error_Handler_Debug */
 }

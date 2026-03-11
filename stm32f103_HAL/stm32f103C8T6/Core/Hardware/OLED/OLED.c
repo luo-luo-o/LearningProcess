@@ -3,7 +3,7 @@
 #include "OLED_Font.h"
 
 // 声明 CubeMX 生成的 I2C 句柄
-extern I2C_HandleTypeDef hi2c1;
+extern I2C_HandleTypeDef hi2c2;
 
 #define OLED_ADDR 0x78 // OLED 的 I2C 地址
 
@@ -13,7 +13,7 @@ extern I2C_HandleTypeDef hi2c1;
 void OLED_WriteCommand(uint8_t Command)
 {
   uint8_t buffer[2] = {0x00, Command}; // 0x00 表示后面是命令
-  HAL_I2C_Master_Transmit(&hi2c1, OLED_ADDR, buffer, 2, HAL_MAX_DELAY);
+  HAL_I2C_Master_Transmit(&hi2c2, OLED_ADDR, buffer, 2, HAL_MAX_DELAY);
 }
 
 /**
@@ -22,7 +22,7 @@ void OLED_WriteCommand(uint8_t Command)
 void OLED_WriteData(uint8_t Data)
 {
   uint8_t buffer[2] = {0x40, Data}; // 0x40 表示后面是数据
-  HAL_I2C_Master_Transmit(&hi2c1, OLED_ADDR, buffer, 2, HAL_MAX_DELAY);
+  HAL_I2C_Master_Transmit(&hi2c2, OLED_ADDR, buffer, 2, HAL_MAX_DELAY);
 }
 
 /* --- 以下逻辑部分与标准库基本一致，仅移除了底层模拟逻辑 --- */
