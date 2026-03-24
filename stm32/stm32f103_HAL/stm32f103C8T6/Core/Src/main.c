@@ -25,6 +25,7 @@
 
 #include "OLED.h"
 #include "CAN.h"
+#include "servo.h"
 
 /* USER CODE END Includes */
 
@@ -35,9 +36,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define LED_ON GPIO_PIN_SET
-#define LED_OFF GPIO_PIN_RESET
 
+#define LED_ON GPIO_PIN_RESET
+#define LED_OFF GPIO_PIN_SET
 
 /* USER CODE END PD */
 
@@ -50,6 +51,9 @@
 CAN_HandleTypeDef hcan;
 
 I2C_HandleTypeDef hi2c2;
+
+TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 
 /* USER CODE BEGIN PV */
 
@@ -65,12 +69,21 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_CAN_Init(void);
 static void MX_I2C2_Init(void);
+static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/* ------------------- flags ----------------- */
+
+bool is_exit0_pressed = false;
+uint32_t stage_id = 0;
+
+/* ------------------------------------------- */
 
 /* USER CODE END 0 */
 
@@ -82,6 +95,8 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+
+
 
   /* USER CODE END 1 */
 
@@ -105,11 +120,19 @@ int main(void)
   MX_GPIO_Init();
   MX_CAN_Init();
   MX_I2C2_Init();
+  MX_TIM2_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   OLED_Init();
   CAN_Init();
+  
+  Servo_t servo_1;
+  // htim2: 编码器定时器
+  // htim3: PWM 定时器
+  Servo_Init(&servo_1, &htim3, TIM_CHANNEL_1, &htim2, 
+    L298N_IN1_GPIO_Port, L298N_IN1_Pin, L298N_IN2_GPIO_Port, L298N_IN2_Pin);
 
-  uint32_t count = 0; // 计数变量
+  static int32_t oled_show_delta_time = 0;
 
   /* USER CODE END 2 */
 
@@ -117,23 +140,41 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    // HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, LED_ON);
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, LED_ON);
 
-    static uint32_t can_send_tick = 0;
-    uint8_t msg1[8] = {'H', 'e', 'l', 'l', 'o', ' ', 'C', 'A'};
-    uint8_t msg2[8] = {'N', '!', 0, 0, 0, 0, 0, 0};
-    uint8_t msg3[8] = {'C', 'O', 'U', 'N', 'T', ':', ' '}; // 用于显示计数值
+    static uint32_t can_send_tick = 100;
 
     if (HAL_GetTick() - can_send_tick >= 0)
     {
-      // CAN_Send_Msg(0x123, msg1, 8); // 发送第一帧
-      // CAN_Send_Msg(0x123, msg2, 2); // 发送第二帧
-      CAN_Send_Msg(0x125, msg3, 7); // 发送第三帧
-      CAN_Send_Num(0x125, count); // 发送计数值
-
-      count++;
 
       can_send_tick = HAL_GetTick();
+    }
+
+    if (is_exit0_pressed)
+      Servo_SetSpeed(&servo_1, 1000);
+    else 
+      Servo_Stop(&servo_1);
+
+    OLED_ShowString(1, 1, "MOTOR: ");
+    Servo_UpdatePos(&servo_1);
+    if (servo_1.last_enc_val < 0)
+    {
+      OLED_ShowChar(1, 7, '-');
+      OLED_ShowNum(1, 8, -servo_1.last_enc_val, 5);
+    }
+    else 
+      OLED_ShowNum(1, 8, servo_1.last_enc_val, 5);
+
+    OLED_ShowString(2, 1, "DELTA: ");
+    if (servo_1.delta_speed < 0) {
+      OLED_ShowChar(2, 7, '-');
+      OLED_ShowNum(2, 8, -servo_1.delta_speed, 5);
+    }
+    else 
+    {
+      OLED_ShowNum(2, 8, servo_1.delta_speed, 5);
+
+     /* 每500ms更新一次OLED显示 */
     }
 
     /* USER CODE END WHILE */
@@ -254,6 +295,104 @@ static void MX_I2C2_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_Encoder_InitTypeDef sConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 65535;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 0;
+  sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC2Filter = 0;
+  if (HAL_TIM_Encoder_Init(&htim2, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 71;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 999;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+  HAL_TIM_MspPostInit(&htim3);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -266,12 +405,23 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, L298N_IN1_Pin|L298N_IN2_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : PC13 */
+  GPIO_InitStruct.Pin = GPIO_PIN_13;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PA0 */
   GPIO_InitStruct.Pin = GPIO_PIN_0;
@@ -279,15 +429,15 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA2 */
-  GPIO_InitStruct.Pin = GPIO_PIN_2;
+  /*Configure GPIO pins : L298N_IN1_Pin L298N_IN2_Pin */
+  GPIO_InitStruct.Pin = L298N_IN1_Pin|L298N_IN2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI0_IRQn, 1, 0);
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI0_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -300,7 +450,7 @@ static void MX_GPIO_Init(void)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   if (GPIO_Pin == GPIO_PIN_0) {
-    OLED_ShowString(1, 1, "OLED Test!!");
+    is_exit0_pressed ^= 1; // 切换状态
   }
 }
 
@@ -313,21 +463,26 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     memcpy(temp, RxData, len);
     temp[len] = '\0'; // 确保字符串结尾
 
-    if (RxHeader.StdId == 0x123) {
-      // if (RxHeader.DLC == 8) {
-      //   OLED_ShowString(1, 1, "CAN Recv:");
-      //   OLED_ShowString(2, 1, temp); // 显示第一帧内容
-      // } else if (RxHeader.DLC == 2) {
-      //   OLED_ShowString(2, 9, temp); // 显示第二帧内容
-      // }
-    } else if (RxHeader.StdId == 0x125) {
-      if (RxHeader.DLC == 7) {  
-       OLED_ShowString(3, 1, temp); // 显示第三帧内容
-      }
-      else {
-        OLED_ShowString(3, 8, temp); // 显示第三帧内容
-      }
-    }
+  }
+}
+
+
+/* Useful private tools functions */
+
+/**
+ * @brief  Macro to run a code block every specified interval in milliseconds.
+ * @param  tick_var: A variable to store the last tick time (must be of type uint32_t).
+ * @param  interval: The interval in milliseconds to run the code block.
+ * @param  func: The function to execute (should be a function call).
+ * @retval None
+ */
+void run_every_ms(uint32_t *tick_var, uint32_t interval, void (*func)(void))
+{
+  uint32_t current_tick = HAL_GetTick();
+  if (current_tick - *tick_var >= interval) // 每interval毫秒执行一次
+  {
+    func();                   // 执行传入的函数
+    *tick_var = current_tick; // 更新上次执行的时间
   }
 }
 
@@ -343,10 +498,10 @@ void Error_Handler(void)
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1) {
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, LED_ON);
-    HAL_Delay(100);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, LED_OFF);
-    HAL_Delay(100);
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, LED_ON);
+    for (int i = 0; i < 1000000; i++) ; // 简单延时
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, LED_OFF);
+    for (int i = 0; i < 1000000; i++) ; // 简单延时
   }
   /* USER CODE END Error_Handler_Debug */
 }

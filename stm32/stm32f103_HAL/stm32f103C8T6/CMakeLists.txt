@@ -46,6 +46,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     "Core/Hardware/OLED/OLED.c"
     "Core/Hardware/CAN/CAN.c"
+    "Core/Hardware/servo/servo.c"
     # Add user sources here
 )
 
@@ -53,6 +54,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     "Core/Hardware/OLED"
     "Core/Hardware/CAN"
+    "Core/Hardware/servo"
     # Add user defined include paths
 )
 

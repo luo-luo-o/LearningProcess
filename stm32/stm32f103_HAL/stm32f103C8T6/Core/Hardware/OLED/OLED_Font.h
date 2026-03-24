@@ -1,6 +1,8 @@
 #ifndef __OLED_FONT_H
 #define __OLED_FONT_H
 
+#pragma GCC diagnostic push                       // 保存当前的编译器警告状态
+#pragma GCC diagnostic ignored "-Wmissing-braces" // 忽略“缺少大括号”警告
 /*OLED字模库，宽8像素，高16像素*/
 const uint8_t OLED_F8x16[][16]=
 {
@@ -289,5 +291,6 @@ const uint8_t OLED_F8x16[][16]=
 	0x00,0x06,0x01,0x01,0x02,0x02,0x04,0x04,
 	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,//~ 94
 };
+#pragma GCC diagnostic pop // 恢复之前的编译器警告状态
 
 #endif

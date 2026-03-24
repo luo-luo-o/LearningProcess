@@ -7,3 +7,5 @@ BreakBeforeBraces: Allman
 
 # 避免影响 CubeMX 生成区域
 CommentPragmas: '^ USER CODE'
+
+ColumnLimit: 120
