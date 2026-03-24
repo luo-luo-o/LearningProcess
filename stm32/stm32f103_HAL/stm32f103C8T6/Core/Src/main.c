@@ -151,7 +151,7 @@ int main(void)
     }
 
     if (is_exit0_pressed)
-      Servo_SetSpeed(&servo_1, 1000);
+      Servo_SetSpeed(&servo_1, 500);
     else 
       Servo_Stop(&servo_1);
 

@@ -1,4 +1,5 @@
 #include "main.h"
+#include "stm32f1xx_hal_gpio.h"
 #include <stdint.h>
 #include "servo.h"
 
@@ -45,7 +46,8 @@ void Servo_UpdatePos(Servo_t *servo)
   int16_t current_val = (int16_t)__HAL_TIM_GET_COUNTER(servo->enc_tim);
 
   // 利用 int16_t 的溢出特性自动计算差值（即使从 0 减到 65535 也会正确得到 -1）
-  servo->delta_speed = current_val - servo->last_enc_val;
+  int16_t delta_speed = current_val - servo->last_enc_val;
+  servo->delta_speed = -delta_speed;
 
   // 累计到长整型位移中
   servo->total_count += servo->delta_speed;
@@ -71,6 +73,8 @@ void Servo_SetPWM(Servo_t *servo, int16_t duty)
 void Servo_Stop(Servo_t *servo)
 {
   __HAL_TIM_SET_COMPARE(servo->pwm_tim, servo->pwm_channel, 0);
+  HAL_GPIO_WritePin(servo->dir1_port, servo->dir1_pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(servo->dir2_port, servo->dir2_pin, GPIO_PIN_RESET);
 }
 
 /**
