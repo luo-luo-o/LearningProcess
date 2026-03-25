@@ -51,6 +51,7 @@
 CAN_HandleTypeDef hcan;
 
 I2C_HandleTypeDef hi2c2;
+DMA_HandleTypeDef hdma_i2c2_tx;
 
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
@@ -67,10 +68,11 @@ char global_buffer[64]; // 用于存储格式化字符串的全局缓冲区
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_CAN_Init(void);
+static void MX_DMA_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_CAN_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -118,10 +120,11 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_CAN_Init();
+  MX_DMA_Init();
   MX_I2C2_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
+  MX_CAN_Init();
   /* USER CODE BEGIN 2 */
   OLED_Init();
   CAN_Init();
@@ -150,32 +153,50 @@ int main(void)
       can_send_tick = HAL_GetTick();
     }
 
-    if (is_exit0_pressed)
-      Servo_SetSpeed(&servo_1, 500);
-    else 
-      Servo_Stop(&servo_1);
+    // if (is_exit0_pressed)
+    //   Servo_SetSpeed(&servo_1, 500);
+    // else 
+    //   Servo_Stop(&servo_1);
 
-    OLED_ShowString(1, 1, "MOTOR: ");
-    Servo_UpdatePos(&servo_1);
-    if (servo_1.last_enc_val < 0)
+    // OLED_ShowString(1, 1, "MOTOR: ");
+    // Servo_UpdatePos(&servo_1);
+    // if (servo_1.last_enc_val < 0)
+    // {
+    //   OLED_ShowChar(1, 7, '-');
+    //   OLED_ShowNum(1, 8, -servo_1.last_enc_val, 5);
+    // }
+    // else 
+    //   OLED_ShowNum(1, 8, servo_1.last_enc_val, 5);
+
+    // OLED_ShowString(2, 1, "DELTA: ");
+    // if (servo_1.delta_speed < 0) {
+    //   OLED_ShowChar(2, 7, '-');
+    //   OLED_ShowNum(2, 8, -servo_1.delta_speed, 5);
+    // }
+    // else 
+    // {
+    //   OLED_ShowNum(2, 8, servo_1.delta_speed, 5);
+    // }
+
+    if (is_exit0_pressed){
+      OLED_ShowString(1, 1, "0123456789012345");
+      OLED_ShowString(2, 1, "0123456789012345");
+      OLED_ShowString(3, 1, "0123456789012345");
+      OLED_ShowString(4, 1, "0123456789012345");
+      // OLED_ShowString(5, 1, "0123456789012345");
+      // OLED_ShowString(6, 1, "0123456789012345");
+      // OLED_ShowString(7, 1, "0123456789012345");
+      // OLED_ShowString(8, 1, "0123456789012345");
+      OLED_Update();
+    }
+    else
     {
-      OLED_ShowChar(1, 7, '-');
-      OLED_ShowNum(1, 8, -servo_1.last_enc_val, 5);
+      OLED_Clear();
+      OLED_Update();
     }
-    else 
-      OLED_ShowNum(1, 8, servo_1.last_enc_val, 5);
+    
 
-    OLED_ShowString(2, 1, "DELTA: ");
-    if (servo_1.delta_speed < 0) {
-      OLED_ShowChar(2, 7, '-');
-      OLED_ShowNum(2, 8, -servo_1.delta_speed, 5);
-    }
-    else 
-    {
-      OLED_ShowNum(2, 8, servo_1.delta_speed, 5);
-
-     /* 每500ms更新一次OLED显示 */
-    }
+    
 
     /* USER CODE END WHILE */
 
@@ -276,7 +297,7 @@ static void MX_I2C2_Init(void)
 
   /* USER CODE END I2C2_Init 1 */
   hi2c2.Instance = I2C2;
-  hi2c2.Init.ClockSpeed = 400000;
+  hi2c2.Init.ClockSpeed = 100000;
   hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c2.Init.OwnAddress1 = 0;
   hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
@@ -393,6 +414,22 @@ static void MX_TIM3_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 8, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -437,7 +474,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI0_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -458,10 +495,6 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
   if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK)
   {
-    char temp[9] = {0};
-    uint8_t len = RxHeader.DLC;
-    memcpy(temp, RxData, len);
-    temp[len] = '\0'; // 确保字符串结尾
 
   }
 }

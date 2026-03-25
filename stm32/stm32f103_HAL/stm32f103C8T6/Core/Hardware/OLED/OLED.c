@@ -17,34 +17,41 @@ void OLED_WriteCommand(uint8_t Command)
 }
 
 /**
- * @brief  向 OLED 发送数据
+ * @brief  通过 DMA 将显存内容刷新到屏幕
+ * @note   建议在 main 循环中每 50ms-100ms 调用一次
  */
-void OLED_WriteData(uint8_t Data)
+void OLED_Update(void)
 {
-  uint8_t buffer[2] = {0x40, Data}; // 0x40 表示后面是数据
-  HAL_I2C_Master_Transmit(&hi2c2, OLED_ADDR, buffer, 2, HAL_MAX_DELAY);
-}
-
-/* --- 以下逻辑部分与标准库基本一致，仅移除了底层模拟逻辑 --- */
-
-void OLED_SetCursor(uint8_t Y, uint8_t X)
-{
-  OLED_WriteCommand(0xB0 | Y);
-  OLED_WriteCommand(0x10 | ((X & 0xF0) >> 4));
-  OLED_WriteCommand(0x00 | (X & 0x0F));
-}
-
-void OLED_Clear(void)
-{
-  uint8_t i, j;
-  for (j = 0; j < 8; j++)
+  // 只有当 I2C 处于 READY 状态（上一帧传完了）才开启新的一帧
+  if (hi2c2.State == HAL_I2C_STATE_READY)
   {
-    OLED_SetCursor(j, 0);
-    for (i = 0; i < 128; i++)
+    // 设置光标回到 (0,0)
+    static uint8_t cursor_cmd[] = {0x21, 0x00, 0x7F, 0x22, 0x00, 0x07};
+    // 这里超时时间设短一点（10ms），防止干扰导致死等
+    if (HAL_I2C_Master_Transmit(&hi2c2, OLED_ADDR, cursor_cmd, 6, 10) == HAL_OK)
     {
-      OLED_WriteData(0x00);
+      // 启动 DMA
+      HAL_I2C_Mem_Write_DMA(&hi2c2, OLED_ADDR, 0x40, I2C_MEMADD_SIZE_8BIT, OLED_DisplayBuf, 1024);
     }
   }
+}
+
+bool _check_range(uint8_t Line, uint8_t Column)
+{
+  if (Line < 1 || Line > ROW || Column < 1 || Column > COL)
+  {
+    return false;
+  }
+  return true;
+
+}
+
+/**
+  * @brief  OLED清屏
+*/
+void OLED_Clear(void)
+{
+  memset(OLED_DisplayBuf, 0, 1024); // 极快，不阻塞 PID
 }
 
 /**
@@ -56,16 +63,31 @@ void OLED_Clear(void)
  */
 void OLED_ShowChar(uint8_t Line, uint8_t Column, char Char)
 {
-  uint8_t i;
-  OLED_SetCursor((Line - 1) * 2, (Column - 1) * 8); // 设置光标位置在上半部分
-  for (i = 0; i < 8; i++)
+  if (!_check_range(Line, Column))
   {
-    OLED_WriteData(OLED_F8x16[Char - ' '][i]); // 显示上半部分内容
+    // Error_Handler();
+    return;
   }
-  OLED_SetCursor((Line - 1) * 2 + 1, (Column - 1) * 8); // 设置光标位置在下半部分
+
+  uint8_t i;
+  uint16_t base_idx;
+  uint8_t char_idx = Char - ' ';
+
+  // 计算显存中的起始位置
+  // 每行占 2 页 (16像素高)，每列占 8 像素宽
+
+  // 上半部分 (8字节)
+  base_idx = ((Line - 1) * 2) * 128 + (Column - 1) * 8;
   for (i = 0; i < 8; i++)
   {
-    OLED_WriteData(OLED_F8x16[Char - ' '][i + 8]); // 显示下半部分内容
+    OLED_DisplayBuf[base_idx + i] = OLED_F8x16[char_idx][i];
+  }
+
+  // 下半部分 (8字节)
+  base_idx = ((Line - 1) * 2 + 1) * 128 + (Column - 1) * 8;
+  for (i = 0; i < 8; i++)
+  {
+    OLED_DisplayBuf[base_idx + i] = OLED_F8x16[char_idx][i + 8];
   }
 }
 
@@ -194,7 +216,6 @@ void OLED_ShowBinNum(uint8_t Line, uint8_t Column, uint32_t Number,
 
 void OLED_Init(void)
 {
-  // 使用 HAL 自带延时，替代之前的 for 循环死等
   HAL_Delay(100);
 
   // I2C 端口初始化已由 CubeMX 在 main() 中通过 MX_I2C1_Init() 完成
@@ -221,6 +242,21 @@ void OLED_Init(void)
   OLED_WriteCommand(0xA6);
   OLED_WriteCommand(0x8D);
   OLED_WriteCommand(0x14);
+
+  // reset
+  // 1. 先设置为页寻址模式 (Page Addressing Mode)
+  OLED_WriteCommand(0x20);
+  OLED_WriteCommand(0x02);
+
+  // 2. 显式归位 (Page 0, Column 0)
+  OLED_WriteCommand(0xB0); // Page 0
+  OLED_WriteCommand(0x00); // Low column 0
+  OLED_WriteCommand(0x10); // High column 0
+
+  OLED_WriteCommand(0x20);
+  OLED_WriteCommand(0x00);
+
   OLED_WriteCommand(0xAF);
   OLED_Clear();
+  OLED_Update();
 }
