@@ -9,8 +9,6 @@
 #define ROW 4
 #define COL 16
 
-static uint8_t OLED_DisplayBuf[1024];
-
 void OLED_Init(void);
 void OLED_Clear(void);
 void OLED_Update(void);

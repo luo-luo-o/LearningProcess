@@ -1,11 +1,5 @@
 #include "main.h"
-#include "stm32f1xx_hal_gpio.h"
-#include <stdint.h>
 #include "servo.h"
-
-/* --------- config ------------ */
-int16_t min_speed = 210;
-/* ----------------------------- */
 
 /**
  * @brief 初始化电机外设
@@ -31,6 +25,8 @@ void Servo_Init(Servo_t *servo, TIM_HandleTypeDef *pwm_tim, uint32_t pwm_ch, TIM
   servo->dir1_port = dir1_port;
   servo->dir2_pin = dir2_pin;
   servo->dir2_port = dir2_port;
+  servo->min_speed = 250;
+  servo->max_speed = 1000;
 
   // 启动硬件
   HAL_TIM_PWM_Start(servo->pwm_tim, servo->pwm_channel);
@@ -84,11 +80,11 @@ void Servo_Stop(Servo_t *servo)
 void Servo_SetSpeed(Servo_t *servo, int16_t speed)
 {
   // 限制速度范围（PWM 周期为 1000） 
-  if (speed > 1000) speed = 1000;
-  if (speed < -1000) speed = -1000;
+  if (speed > servo->max_speed) speed = servo->max_speed;
+  if (speed < -servo->max_speed) speed = -servo->max_speed;
 
-  if (speed > 0 && speed < min_speed) speed = min_speed; // 正转最低速度
-  if (speed < 0 && speed > -min_speed) speed = -min_speed; // 反转最低速度
+  if (speed > 0 && speed < servo->min_speed) speed = servo->min_speed; // 正转最低速度
+  if (speed < 0 && speed > -servo->min_speed) speed = -servo->min_speed; // 反转最低速度
 
   if (speed > 0) {
     // 正转
@@ -104,4 +100,63 @@ void Servo_SetSpeed(Servo_t *servo, int16_t speed)
     // 停止
     Servo_Stop(servo);
   }
+}
+
+void PID_Init(PID_TypeDef *pid, float Kp, float Ki, float Kd, float output_min, float output_max, float integral_max)
+{
+  pid->Kp = Kp;
+  pid->Ki = Ki;
+  pid->Kd = Kd;
+  pid->Target = 0;
+  pid->Current = 0;
+  pid->Error = 0;
+  pid->Last_Error = 0;
+  pid->Pre_Error = 0;
+  pid->Integral = 0;
+  pid->Output = 0;
+  pid->Output_Max = output_max;
+  pid->Output_Min = output_min;
+  pid->Integral_Max = integral_max;
+}
+
+void PID_Set_Kp(PID_TypeDef *pid, float Kp)
+{
+  pid->Kp = Kp;
+}
+
+void PID_Set_Ki(PID_TypeDef *pid, float Ki)
+{
+  pid->Ki = Ki;
+}
+
+void PID_Set_Kd(PID_TypeDef *pid, float Kd)
+{
+  pid->Kd = Kd;
+}
+
+float PID_Position_Calc(PID_TypeDef *pid, float target, float current)
+{
+  pid->Target = target;
+  pid->Current = current;
+  pid->Error = pid->Target - pid->Current;
+
+  // 1. 积分累加（带限幅，防止积分过冲）
+  pid->Integral += pid->Error;
+  if (pid->Integral > pid->Integral_Max)
+    pid->Integral = pid->Integral_Max;
+  if (pid->Integral < -pid->Integral_Max)
+    pid->Integral = -pid->Integral_Max;
+
+  // 2. 计算公式: Output = Kp*e + Ki*sum(e) + Kd*(e - e_last)
+  pid->Output = pid->Kp * pid->Error + pid->Ki * pid->Integral + pid->Kd * (pid->Error - pid->Last_Error);
+
+  pid->Last_Error = pid->Error;
+
+  // 3. 输出限幅
+  if (pid->Output > pid->Output_Max)
+    pid->Output = pid->Output_Max;
+  if (pid->Output < -pid->Output_Max)
+    pid->Output = -pid->Output_Max;
+
+  return pid->Output;
 }

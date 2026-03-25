@@ -26,6 +26,12 @@
 #include "OLED.h"
 #include "CAN.h"
 #include "servo.h"
+#include "stm32f103xb.h"
+#include "stm32f1xx_hal.h"
+#include "stm32f1xx_hal_gpio.h"
+#include "stm32f1xx_hal_tim.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 /* USER CODE END Includes */
 
@@ -55,11 +61,14 @@ DMA_HandleTypeDef hdma_i2c2_tx;
 
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim4;
 
 /* USER CODE BEGIN PV */
 
 static CAN_RxHeaderTypeDef RxHeader;
 static uint8_t RxData[8];
+Servo_t servo_1;
+PID_TypeDef pid_1;
 
 char global_buffer[64]; // 用于存储格式化字符串的全局缓冲区
 
@@ -73,6 +82,7 @@ static void MX_I2C2_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_CAN_Init(void);
+static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -84,8 +94,11 @@ static void MX_CAN_Init(void);
 
 bool is_exit0_pressed = false;
 uint32_t stage_id = 0;
+static bool go_to_target = false;
+static uint16_t target_position = 0;  // 1560 nearly a circle
 
 /* ------------------------------------------- */
+
 
 /* USER CODE END 0 */
 
@@ -125,74 +138,75 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_CAN_Init();
+  MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
   OLED_Init();
   CAN_Init();
-  
-  Servo_t servo_1;
-  // htim2: 编码器定时器
-  // htim3: PWM 定时器
+
+  // htim3: PWM 定时器, htim2: 编码器定时器
   Servo_Init(&servo_1, &htim3, TIM_CHANNEL_1, &htim2, 
     L298N_IN1_GPIO_Port, L298N_IN1_Pin, L298N_IN2_GPIO_Port, L298N_IN2_Pin);
 
-  static int32_t oled_show_delta_time = 0;
+  PID_Init(&pid_1, 1.0f, 0.0f, 0.0f, servo_1.min_speed, servo_1.max_speed, 500.0f); // 初始 PID 参数
 
+  static uint32_t oled_show_tick = 0;
+  static uint32_t can_send_tick = 0;
+  static uint32_t led_tick = 0;
+
+
+
+  HAL_TIM_Base_Start_IT(&htim4);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, LED_ON);
+    if (led_tick <= 2000)
+    {
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, LED_ON);
+      led_tick = HAL_GetTick();
+    }
+    else {
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, LED_OFF);
+    }
 
-    static uint32_t can_send_tick = 100;
 
-    if (HAL_GetTick() - can_send_tick >= 0)
+    if (HAL_GetTick() - can_send_tick >= 100)
     {
 
       can_send_tick = HAL_GetTick();
     }
 
-    // if (is_exit0_pressed)
-    //   Servo_SetSpeed(&servo_1, 500);
-    // else 
-    //   Servo_Stop(&servo_1);
-
-    // OLED_ShowString(1, 1, "MOTOR: ");
-    // Servo_UpdatePos(&servo_1);
-    // if (servo_1.last_enc_val < 0)
-    // {
-    //   OLED_ShowChar(1, 7, '-');
-    //   OLED_ShowNum(1, 8, -servo_1.last_enc_val, 5);
-    // }
-    // else 
-    //   OLED_ShowNum(1, 8, servo_1.last_enc_val, 5);
-
-    // OLED_ShowString(2, 1, "DELTA: ");
-    // if (servo_1.delta_speed < 0) {
-    //   OLED_ShowChar(2, 7, '-');
-    //   OLED_ShowNum(2, 8, -servo_1.delta_speed, 5);
-    // }
-    // else 
-    // {
-    //   OLED_ShowNum(2, 8, servo_1.delta_speed, 5);
-    // }
-
-    if (is_exit0_pressed){
-      OLED_ShowString(1, 1, "0123456789012345");
-      OLED_ShowString(2, 1, "0123456789012345");
-      OLED_ShowString(3, 1, "0123456789012345");
-      OLED_ShowString(4, 1, "0123456789012345");
-      // OLED_ShowString(5, 1, "0123456789012345");
-      // OLED_ShowString(6, 1, "0123456789012345");
-      // OLED_ShowString(7, 1, "0123456789012345");
-      // OLED_ShowString(8, 1, "0123456789012345");
+    if (HAL_GetTick() - oled_show_tick >= 33) {
       OLED_Update();
+      oled_show_tick = HAL_GetTick();
+    }
+
+    OLED_ShowString(1, 1, "TOTLE: ");
+    if (servo_1.total_count < 0)
+    {
+      OLED_ShowChar(1, 7, '-');
+      OLED_ShowNum(1, 8, -servo_1.total_count, 5);
     }
     else
+      OLED_ShowNum(1, 8, servo_1.total_count, 5);
+
+    OLED_ShowString(2, 1, "DELTA: ");
+    if (servo_1.delta_speed < 0) {
+      OLED_ShowChar(2, 7, '-');
+      OLED_ShowNum(2, 8, -servo_1.delta_speed, 5);
+    }
+    else 
     {
-      OLED_Clear();
-      OLED_Update();
+      OLED_ShowNum(2, 8, servo_1.delta_speed, 5);
+    }
+
+    if (is_exit0_pressed)
+    {
+      target_position = 10;
+      go_to_target = true;
+      is_exit0_pressed = false;
     }
     
 
@@ -297,7 +311,7 @@ static void MX_I2C2_Init(void)
 
   /* USER CODE END I2C2_Init 1 */
   hi2c2.Instance = I2C2;
-  hi2c2.Init.ClockSpeed = 100000;
+  hi2c2.Init.ClockSpeed = 400000;
   hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c2.Init.OwnAddress1 = 0;
   hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
@@ -414,6 +428,51 @@ static void MX_TIM3_Init(void)
 }
 
 /**
+  * @brief TIM4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM4_Init(void)
+{
+
+  /* USER CODE BEGIN TIM4_Init 0 */
+
+  /* USER CODE END TIM4_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM4_Init 1 */
+
+  /* USER CODE END TIM4_Init 1 */
+  htim4.Instance = TIM4;
+  htim4.Init.Prescaler = 71;
+  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim4.Init.Period = 9999;
+  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM4_Init 2 */
+
+  /* USER CODE END TIM4_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -491,6 +550,22 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   }
 }
 
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  if (htim->Instance == TIM4) {
+    if (go_to_target){
+      Servo_UpdatePos(&servo_1);
+      // target 1560 nearly a circle
+      float output = PID_Position_Calc(&pid_1, (float)target_position, (float)servo_1.total_count);
+      if (servo_1.total_count == target_position) go_to_target = false;
+      Servo_SetSpeed(&servo_1, (int16_t)output);
+    } else {
+      Servo_Stop(&servo_1);
+    }
+    
+  }
+}
+
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
   if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK)
@@ -499,25 +574,6 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
   }
 }
 
-
-/* Useful private tools functions */
-
-/**
- * @brief  Macro to run a code block every specified interval in milliseconds.
- * @param  tick_var: A variable to store the last tick time (must be of type uint32_t).
- * @param  interval: The interval in milliseconds to run the code block.
- * @param  func: The function to execute (should be a function call).
- * @retval None
- */
-void run_every_ms(uint32_t *tick_var, uint32_t interval, void (*func)(void))
-{
-  uint32_t current_tick = HAL_GetTick();
-  if (current_tick - *tick_var >= interval) // 每interval毫秒执行一次
-  {
-    func();                   // 执行传入的函数
-    *tick_var = current_tick; // 更新上次执行的时间
-  }
-}
 
 /* USER CODE END 4 */
 

@@ -5,6 +5,8 @@
 // 声明 CubeMX 生成的 I2C 句柄
 extern I2C_HandleTypeDef hi2c2;
 
+static uint8_t OLED_DisplayBuf[1024];
+
 #define OLED_ADDR 0x78 // OLED 的 I2C 地址
 
 /**

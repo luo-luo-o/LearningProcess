@@ -1,5 +1,4 @@
 #include "main.h"
-#include <stdint.h>
 #include "CAN.h"
 
 extern CAN_HandleTypeDef hcan;

@@ -79,23 +79,6 @@ void run_every_ms(uint32_t *tick_var, uint32_t interval, void (*func)(void));
 
 /* -------------- magic defines ---------------- */
 
-/**
- * @brief  Macro to run a code block every specified interval in milliseconds.
- * @param  tick_var: A variable to store the last tick time (must be of type
- * uint32_t).
- * @param  interval: The interval in milliseconds to run the code block.
- * @param  code_block: The code block to execute (should be a lambda or function
- * call).
- */
-#define RUN_EVERY_MS(tick_var, interval, code_block)                           \
-  do                                                                           \
-  {                                                                            \
-    if (HAL_GetTick() - (tick_var) >= (interval))                              \
-    {                                                                          \
-      {code_block}(tick_var) = HAL_GetTick();                                  \
-    }                                                                          \
-  } while (0)
-
 /* --------------------------------------------- */
 /* USER CODE END Private defines */
 
