@@ -155,7 +155,7 @@ int main(void)
             L298N_IN1_GPIO_Port, L298N_IN1_Pin, L298N_IN2_GPIO_Port, L298N_IN2_Pin, &huart1);
 
   // 【修改】直接面向伺服对象配置内部 PID 的初始参数
-  Servo_ConfigPID(&servo_1, 0.40f, 0.0f, 0.0f, 500.0f);
+  Servo_ConfigPID(&servo_1, 25.0f, 0.0f, 4.0f, 500.0f);
 
   static uint32_t oled_show_tick = 0;
   static uint32_t can_send_tick = 0;
@@ -206,6 +206,17 @@ int main(void)
     {
       OLED_ShowNum(2, 8, servo_1.delta_speed, 5);
     }
+
+    OLED_ShowString(4, 1, "Target: ");
+    if (servo_1.target_position < 0) {
+      OLED_ShowChar(4, 9, '-');
+      OLED_ShowNum(4, 10, -servo_1.target_position, 5);
+    }
+    else 
+    {
+      OLED_ShowNum(4, 9, servo_1.target_position, 6);
+    }
+    
 
     char pid_buf[64]; // 16个字符 + 1个终止符
 
@@ -689,6 +700,20 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         }
 
         // 重新开启单字节中断接收
+        HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
+    }
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == huart1.Instance)
+    {
+        rx_index = 0;
+        __HAL_UART_CLEAR_PEFLAG(huart);
+        __HAL_UART_CLEAR_FEFLAG(huart);
+        __HAL_UART_CLEAR_NEFLAG(huart);
+        __HAL_UART_CLEAR_OREFLAG(huart);
+        huart->ErrorCode = HAL_UART_ERROR_NONE;
         HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
     }
 }

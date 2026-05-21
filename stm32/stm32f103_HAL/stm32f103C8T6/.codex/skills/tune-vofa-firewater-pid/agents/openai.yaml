@@ -1,0 +1,4 @@
+interface:
+  display_name: "VOFA FireWater PID Tuning"
+  short_description: "Tune STM32 PID loops using VOFA+ FireWater serial telemetry."
+  default_prompt: "Use this skill to analyze VOFA+ FireWater PID telemetry, suggest safe PID changes, and work with this STM32 project's serial protocol."

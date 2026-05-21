@@ -1,6 +1,51 @@
 #include "servo.h"
 #include "stm32f1xx_hal_tim.h"
 
+static void Servo_ApplySpeed(Servo_t *servo, int16_t speed)
+{
+    if (speed > servo->max_speed)  speed = servo->max_speed;
+    if (speed < -servo->max_speed) speed = -servo->max_speed;
+
+    if (speed > 0) {
+        HAL_GPIO_WritePin(servo->dir1_port, servo->dir1_pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(servo->dir2_port, servo->dir2_pin, GPIO_PIN_RESET);
+        __HAL_TIM_SET_COMPARE(servo->pwm_tim, servo->pwm_channel, speed);
+    } else if (speed < 0) {
+        HAL_GPIO_WritePin(servo->dir1_port, servo->dir1_pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(servo->dir2_port, servo->dir2_pin, GPIO_PIN_SET);
+        __HAL_TIM_SET_COMPARE(servo->pwm_tim, servo->pwm_channel, -speed);
+    } else {
+        __HAL_TIM_SET_COMPARE(servo->pwm_tim, servo->pwm_channel, 0);
+        HAL_GPIO_WritePin(servo->dir1_port, servo->dir1_pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(servo->dir2_port, servo->dir2_pin, GPIO_PIN_RESET);
+    }
+}
+
+static void Servo_UpdateProfileTarget(Servo_t *servo)
+{
+    int32_t delta = servo->target_position - servo->profile_target;
+    int16_t step = servo->profile_step;
+
+    if (step <= 0)
+    {
+        servo->profile_target = servo->target_position;
+        return;
+    }
+
+    if (delta > step)
+    {
+        servo->profile_target += step;
+    }
+    else if (delta < -step)
+    {
+        servo->profile_target -= step;
+    }
+    else
+    {
+        servo->profile_target = servo->target_position;
+    }
+}
+
 /**
  * @brief 初始化电机外设状态，并为内部 PID 绑定 VOFA+ 串口
  * @param vofa_uart 专门传给内部 PID 模块使用的 VOFA 串口句柄
@@ -24,6 +69,8 @@ void Servo_Init(Servo_t *servo, TIM_HandleTypeDef *pwm_tim, uint32_t pwm_ch, TIM
     servo->max_speed = (int16_t)__HAL_TIM_GET_AUTORELOAD(pwm_tim);
     
     servo->target_position = 0;
+    servo->profile_target = 0;
+    servo->profile_step = 6;
     servo->is_pos_closed_loop = false;
 
     // 初始化内部 PID，并将串口句柄直接透传给 PID 模块实现自集成
@@ -72,19 +119,10 @@ void Servo_SetTargetPos(Servo_t *servo, int32_t target_pos)
  */
 void Servo_SetSpeed(Servo_t *servo, int16_t speed)
 {
-    if (speed > servo->max_speed)  speed = servo->max_speed;
-    if (speed < -servo->max_speed) speed = -servo->max_speed;
-
-    if (speed > 0) {
-        HAL_GPIO_WritePin(servo->dir1_port, servo->dir1_pin, GPIO_PIN_SET);
-        HAL_GPIO_WritePin(servo->dir2_port, servo->dir2_pin, GPIO_PIN_RESET);
-        __HAL_TIM_SET_COMPARE(servo->pwm_tim, servo->pwm_channel, speed);
-    } else if (speed < 0) {
-        HAL_GPIO_WritePin(servo->dir1_port, servo->dir1_pin, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(servo->dir2_port, servo->dir2_pin, GPIO_PIN_SET);
-        __HAL_TIM_SET_COMPARE(servo->pwm_tim, servo->pwm_channel, -speed);
-    } else {
+    if (speed == 0) {
         Servo_Stop(servo);
+    } else {
+        Servo_ApplySpeed(servo, speed);
     }
 }
 
@@ -94,6 +132,8 @@ void Servo_SetSpeed(Servo_t *servo, int16_t speed)
 void Servo_Stop(Servo_t *servo)
 {
     servo->is_pos_closed_loop = false;
+    servo->profile_target = servo->target_position;
+    servo->pos_pid.Output = 0.0f;
     __HAL_TIM_SET_COMPARE(servo->pwm_tim, servo->pwm_channel, 0);
     HAL_GPIO_WritePin(servo->dir1_port, servo->dir1_pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(servo->dir2_port, servo->dir2_pin, GPIO_PIN_RESET);
@@ -112,13 +152,18 @@ void Servo_Task(Servo_t *servo)
     if (servo->is_pos_closed_loop)
     {
         // 隐式调用底层 PID 运算
-        float pid_out = PID_Calc(&servo->pos_pid, (float)servo->target_position, (float)servo->total_count);
-        
-        if (servo->total_count == servo->target_position) {
-            Servo_Stop(servo);
-        } else {
-            Servo_SetSpeed(servo, (int16_t)pid_out);
-        }
+        Servo_UpdateProfileTarget(servo);
+        float pid_out = PID_Calc(&servo->pos_pid, (float)servo->profile_target, (float)servo->total_count);
+
+        Servo_ApplySpeed(servo, (int16_t)pid_out);
+    }
+    else
+    {
+        servo->profile_target = servo->target_position;
+        servo->pos_pid.Target = (float)servo->profile_target;
+        servo->pos_pid.Current = (float)servo->total_count;
+        servo->pos_pid.Error = servo->pos_pid.Target - servo->pos_pid.Current;
+        servo->pos_pid.Output = 0.0f;
     }
     
     // 3. 【核心集成点】计算完成后，PID 自主将当前的 Target 和 Current 吐给 VOFA+

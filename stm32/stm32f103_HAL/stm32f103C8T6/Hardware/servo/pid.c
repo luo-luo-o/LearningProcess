@@ -1,5 +1,70 @@
 #include "pid.h"
+#include <stdlib.h>
 #include <string.h>
+
+static int PID_FormatFloat3(char *buf, size_t buf_size, float value)
+{
+    int32_t value_int = (int32_t)value;
+    int32_t value_dec = abs((int32_t)((value - value_int) * 1000.0f));
+    const char *sign = "";
+
+    if (value < 0.0f && value_int == 0)
+    {
+        sign = "-";
+    }
+
+    return snprintf(buf, buf_size, "%s%ld.%03ld", sign, (long)value_int, (long)value_dec);
+}
+
+static int PID_AppendFloat3(char *buf, size_t buf_size, int offset, float value)
+{
+    int written;
+    size_t remaining;
+
+    if (offset < 0 || (size_t)offset >= buf_size)
+    {
+        return offset;
+    }
+
+    remaining = buf_size - (size_t)offset;
+    written = PID_FormatFloat3(&buf[offset], remaining, value);
+    if (written < 0)
+    {
+        return offset;
+    }
+
+    if ((size_t)written >= remaining)
+    {
+        return (int)buf_size - 1;
+    }
+
+    return offset + written;
+}
+
+static int PID_AppendText(char *buf, size_t buf_size, int offset, const char *text)
+{
+    int written;
+    size_t remaining;
+
+    if (offset < 0 || (size_t)offset >= buf_size)
+    {
+        return offset;
+    }
+
+    remaining = buf_size - (size_t)offset;
+    written = snprintf(&buf[offset], remaining, "%s", text);
+    if (written < 0)
+    {
+        return offset;
+    }
+
+    if ((size_t)written >= remaining)
+    {
+        return (int)buf_size - 1;
+    }
+
+    return offset + written;
+}
 
 /**
  * @brief 初始化 PID，并绑定 VOFA+ 串口
@@ -14,6 +79,7 @@ void PID_Init(PID_TypeDef *pid, float Kp, float Ki, float Kd, float output_min, 
     pid->Error = 0.0f;
     pid->Last_Error = 0.0f;
     pid->Integral = 0.0f;
+    pid->Output = 0.0f;
     pid->Output_Min = output_min;
     pid->Output_Max = output_max;
     pid->Integral_Max = integral_max;
@@ -40,7 +106,9 @@ float PID_Calc(PID_TypeDef *pid, float target, float current)
     if (output > pid->Output_Max) output = pid->Output_Max;
     if (output < pid->Output_Min) output = pid->Output_Min;
 
-    return output;
+    pid->Output = output;
+
+    return pid->Output;
 }
 
 /**
@@ -51,36 +119,29 @@ void PID_SendToVofa(PID_TypeDef *pid)
 {
     if (pid->vofa_uart == NULL) return;
 
-    char tx_buf[64];
-    
-    // 1. 拆分 Target (目标值) 的整数与 3 位小数
-    int32_t target_int = (int32_t)pid->Target;
-    // 乘以 1000 保留三位，取绝对值防止出现类似 "0.-125" 的错误
-    int32_t target_dec = abs((int32_t)((pid->Target - target_int) * 1000)); 
+    char tx_buf[160];
+    int len = 0;
 
-    // 2. 拆分 Current (当前值) 的整数与 3 位小数
-    int32_t current_int = (int32_t)pid->Current;
-    int32_t current_dec = abs((int32_t)((pid->Current - current_int) * 1000));
+    // FireWater: Target,Current,Error,Output,Kp,Ki,Kd
+    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Target);
+    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, ",");
+    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Current);
+    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, ",");
+    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Error);
+    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, ",");
+    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Output);
+    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, ",");
+    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Kp);
+    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, ",");
+    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Ki);
+    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, ",");
+    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Kd);
+    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, "\n");
 
-    // 3. 针对负数情况的特殊边界优化（处理 -0.XXX 的情况）
-    // 当浮点数在 -1.0 到 0.0 之间时，整数部分为 0，负号会丢失，需要手动补上
-    char target_sign[2] = "";
-    if (pid->Target < 0 && target_int == 0) {
-        target_sign[0] = '-';
-        target_sign[1] = '\0';
+    if ((size_t)len >= sizeof(tx_buf))
+    {
+        len = sizeof(tx_buf) - 1;
     }
-    
-    char current_sign[2] = "";
-    if (pid->Current < 0 && current_int == 0) {
-        current_sign[0] = '-';
-        current_sign[1] = '\0';
-    }
-
-    // 4. 组合为 FireWater 字符串文本
-    // %03d 的意思是：如果小数部分不足 3 位（比如 0.005 乘 1000 得到 5），前面自动补 0 变成 "005"
-    int len = sprintf(tx_buf, "%s%ld.%03ld,%s%ld.%03ld\n", 
-                      target_sign, target_int, target_dec,
-                      current_sign, current_int, current_dec);
 
     // 5. 串口发送纯文本
     HAL_UART_Transmit(pid->vofa_uart, (uint8_t*)tx_buf, len, 10);

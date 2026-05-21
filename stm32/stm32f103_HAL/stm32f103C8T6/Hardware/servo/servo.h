@@ -23,6 +23,8 @@ typedef struct
     int16_t max_speed;              // 硬件 ARR 最大限幅
     
     int32_t target_position;        // 目标位置
+    int32_t profile_target;         // Profiled target used by position PID
+    int16_t profile_step;           // Max profile change per Servo_Task tick
     bool is_pos_closed_loop;        // 是否开启位置闭环控制锁
     
     PID_TypeDef pos_pid;            // 内部嵌套：集成了 VOFA+ 的位置环 PID

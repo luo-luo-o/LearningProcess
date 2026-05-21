@@ -15,6 +15,7 @@ typedef struct
     float Error;
     float Last_Error;
     float Integral;
+    float Output;
     
     /* 限幅参数 */
     float Output_Max;
