@@ -31,9 +31,11 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 /* USER CODE END Includes */
 
@@ -58,7 +60,7 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-void run_every_ms(uint32_t *tick_var, uint32_t interval, void (*func)(void));
+  void run_every_ms(uint32_t *tick_var, uint32_t interval, void (*func)(void));
 
 /* USER CODE END EFP */
 

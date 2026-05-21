@@ -26,12 +26,6 @@
 #include "OLED.h"
 #include "CAN.h"
 #include "servo.h"
-#include "stm32f103xb.h"
-#include "stm32f1xx_hal.h"
-#include "stm32f1xx_hal_gpio.h"
-#include "stm32f1xx_hal_tim.h"
-#include <stdbool.h>
-#include <stdint.h>
 
 /* USER CODE END Includes */
 
@@ -63,14 +57,20 @@ TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 
+UART_HandleTypeDef huart1;
+
 /* USER CODE BEGIN PV */
 
 static CAN_RxHeaderTypeDef RxHeader;
 static uint8_t RxData[8];
 Servo_t servo_1;
-PID_TypeDef pid_1;
 
-char global_buffer[64]; // 用于存储格式化字符串的全局缓冲区
+/* ---- 新增 VOFA+ 串口调参接收缓冲区 ---- */
+#define RX_BUF_SIZE 64
+uint8_t rx_byte;
+uint8_t rx_buffer[RX_BUF_SIZE];
+uint8_t rx_index = 0;
+/* -------------------------------------- */
 
 /* USER CODE END PV */
 
@@ -83,6 +83,7 @@ static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_CAN_Init(void);
 static void MX_TIM4_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -92,9 +93,10 @@ static void MX_TIM4_Init(void);
 
 /* ------------------- flags ----------------- */
 
-bool is_exit0_pressed = false;
+volatile bool is_exti0_pressed = false;
+volatile bool is_exti2_pressed = false;
 uint32_t stage_id = 0;
-static bool go_to_target = false;
+static volatile bool go_to_target = false;
 static uint16_t target_position = 0;  // 1560 nearly a circle
 
 /* ------------------------------------------- */
@@ -139,21 +141,25 @@ int main(void)
   MX_TIM3_Init();
   MX_CAN_Init();
   MX_TIM4_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   OLED_Init();
   CAN_Init();
 
-  // htim3: PWM 定时器, htim2: 编码器定时器
-  Servo_Init(&servo_1, &htim3, TIM_CHANNEL_1, &htim2, 
-    L298N_IN1_GPIO_Port, L298N_IN1_Pin, L298N_IN2_GPIO_Port, L298N_IN2_Pin);
+  HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
 
-  PID_Init(&pid_1, 1.0f, 0.0f, 0.0f, servo_1.min_speed, servo_1.max_speed, 500.0f); // 初始 PID 参数
+
+  // htim3: PWM 定时器, htim2: 编码器定时器
+  // 【修改】最后新增一个参数 &huart1，将其绑定给内部 PID 进行组件化集成
+  Servo_Init(&servo_1, &htim3, TIM_CHANNEL_1, &htim2, 
+            L298N_IN1_GPIO_Port, L298N_IN1_Pin, L298N_IN2_GPIO_Port, L298N_IN2_Pin, &huart1);
+
+  // 【修改】直接面向伺服对象配置内部 PID 的初始参数
+  Servo_ConfigPID(&servo_1, 0.40f, 0.0f, 0.0f, 500.0f);
 
   static uint32_t oled_show_tick = 0;
   static uint32_t can_send_tick = 0;
   static uint32_t led_tick = 0;
-
-
 
   HAL_TIM_Base_Start_IT(&htim4);
   /* USER CODE END 2 */
@@ -170,7 +176,6 @@ int main(void)
     else {
       HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, LED_OFF);
     }
-
 
     if (HAL_GetTick() - can_send_tick >= 100)
     {
@@ -202,13 +207,39 @@ int main(void)
       OLED_ShowNum(2, 8, servo_1.delta_speed, 5);
     }
 
-    if (is_exit0_pressed)
+    char pid_buf[64]; // 16个字符 + 1个终止符
+
+    // 1. 处理 Kp (保留1位小数)
+    int16_t kp_int = (int16_t)servo_1.pos_pid.Kp;
+    int16_t kp_dec = (int16_t)(servo_1.pos_pid.Kp * 10) % 10;
+
+    // 2. 处理 Ki (保留3位小数，因为它通常很小)
+    int16_t ki_int = (int16_t)servo_1.pos_pid.Ki;
+    int16_t ki_dec = (int16_t)(servo_1.pos_pid.Ki * 100) % 100;
+
+    // 3. 处理 Kd (保留2位小数)
+    int16_t kd_int = (int16_t)servo_1.pos_pid.Kd;
+    int16_t kd_dec = (int16_t)(servo_1.pos_pid.Kd * 100) % 100;
+
+    // 4. 使用基础的 %d 组合字符串
+    // %03d 的意思是：如果小数是 5，显示为 005 而不是 5
+    snprintf(pid_buf, sizeof(pid_buf), "P%d.%d I%d.%02d D%d.%02d", kp_int, kp_dec, ki_int, ki_dec, kd_int, kd_dec);
+    OLED_ShowString(3, 1, pid_buf);
+
+// 【修改】按键 1 逻辑：直接调用高层闭环动作函数
+    if (is_exti0_pressed)
     {
-      target_position = 10;
-      go_to_target = true;
-      is_exit0_pressed = false;
+        Servo_SetTargetPos(&servo_1, servo_1.target_position + 1000); // 干净的目标设定
+        is_exti0_pressed = false;
     }
-    
+
+    // 按键 2 逻辑：在线微调依然可以通过访问子成员变量实现
+    if (is_exti2_pressed)
+    {
+        // ... 原有的闪烁逻辑 ...
+        servo_1.pos_pid.Kp += 0.01f; // 依然支持直接通过子对象微调
+        is_exti2_pressed = false;
+    }
 
     
 
@@ -397,9 +428,9 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 71;
+  htim3.Init.Prescaler = 0;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 999;
+  htim3.Init.Period = 3599;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
@@ -473,6 +504,39 @@ static void MX_TIM4_Init(void)
 }
 
 /**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 115200;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -519,8 +583,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA0 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  /*Configure GPIO pins : PA0 PA2 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_2;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
@@ -536,6 +600,9 @@ static void MX_GPIO_Init(void)
   HAL_NVIC_SetPriority(EXTI0_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI0_IRQn);
 
+  HAL_NVIC_SetPriority(EXTI2_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
+
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
@@ -543,26 +610,31 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+static uint32_t last_exti0_tick = 0;
+static uint32_t last_exti2_tick = 0;
+
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   if (GPIO_Pin == GPIO_PIN_0) {
-    is_exit0_pressed ^= 1; // 切换状态
+    if (HAL_GetTick() - last_exti0_tick < 50) {
+      return; // 忽略抖动
+    }
+    is_exti0_pressed = 1; // 切换状态
+    last_exti0_tick = HAL_GetTick();
+  }
+  else if (GPIO_Pin == GPIO_PIN_2) {
+    if (HAL_GetTick() - last_exti2_tick < 50) {
+      return; // 忽略抖动
+    }
+    is_exti2_pressed = 1;
+    last_exti2_tick = HAL_GetTick();
   }
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   if (htim->Instance == TIM4) {
-    if (go_to_target){
-      Servo_UpdatePos(&servo_1);
-      // target 1560 nearly a circle
-      float output = PID_Position_Calc(&pid_1, (float)target_position, (float)servo_1.total_count);
-      if (servo_1.total_count == target_position) go_to_target = false;
-      Servo_SetSpeed(&servo_1, (int16_t)output);
-    } else {
-      Servo_Stop(&servo_1);
-    }
-    
+    Servo_Task(&servo_1);
   }
 }
 
@@ -574,6 +646,52 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
   }
 }
 
+/**
+ * @brief 【新增】接收 VOFA+ 调参控件发来的指令字符串并丢给 PID 自我解析
+ */
+/* USER CODE BEGIN 4 */
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == huart1.Instance)
+    {
+        // 当捕获到换行符 \n 或 \r 时，说明一帧数据接收完毕
+        if (rx_byte == '\n' || rx_byte == '\r')
+        {
+            if (rx_index > 0) // 缓冲区内确实有有效数据
+            {
+                rx_buffer[rx_index] = '\0'; // 强行添加字符串结束符
+
+                // 正常的指令分发解析逻辑
+                if (rx_buffer[0] == 'T' && rx_buffer[1] == '=') 
+                {
+                    Servo_SetTargetPos(&servo_1, atoi((char*)rx_buffer + 2));
+                }
+                else
+                {
+                    PID_ParseCommand(&servo_1.pos_pid, (char*)rx_buffer);
+                }
+            }
+            // 无论 rx_index 是否大于 0，只要见到换行符，一律重置指针，免疫连续 \r\n 造成的死锁
+            rx_index = 0; 
+        }
+        else
+        {
+            // 正常数据存入缓冲区
+            if (rx_index < RX_BUF_SIZE - 1)
+            {
+                rx_buffer[rx_index++] = rx_byte;
+            }
+            else
+            {
+                rx_index = 0; // 缓冲区满溢出保护
+            }
+        }
+
+        // 重新开启单字节中断接收
+        HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
+    }
+}
 
 /* USER CODE END 4 */
 

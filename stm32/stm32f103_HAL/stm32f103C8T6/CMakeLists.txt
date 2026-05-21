@@ -47,6 +47,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     "Hardware/OLED/OLED.c"
     "Hardware/CAN/CAN.c"
     "Hardware/servo/servo.c"
+    "Hardware/servo/pid.c"
     # Add user sources here
 )
 
