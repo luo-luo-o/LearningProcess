@@ -19,14 +19,21 @@ class Sample:
     current: float
     error: float | None = None
     output: float | None = None
+    pos_output: float | None = None
     kp: float | None = None
     ki: float | None = None
     kd: float | None = None
+    target_speed: float | None = None
+    current_speed: float | None = None
+    speed_error: float | None = None
+    speed_kp: float | None = None
+    speed_ki: float | None = None
+    speed_kd: float | None = None
 
 
 def parse_line(line: str) -> Sample | None:
     parts = [p.strip() for p in line.strip().split(",") if p.strip()]
-    if len(parts) not in (2, 7):
+    if len(parts) not in (2, 7, 13, 14):
         return None
     try:
         values = [float(p) for p in parts]
@@ -35,6 +42,70 @@ def parse_line(line: str) -> Sample | None:
     if len(values) == 2:
         target, current = values
         return Sample(target=target, current=current, error=target - current)
+    if len(values) == 13:
+        (
+            target,
+            current,
+            error,
+            target_speed,
+            current_speed,
+            speed_error,
+            pwm_output,
+            pos_kp,
+            pos_ki,
+            pos_kd,
+            speed_kp,
+            speed_ki,
+            speed_kd,
+        ) = values
+        return Sample(
+            target=target,
+            current=current,
+            error=error,
+            output=pwm_output,
+            kp=pos_kp,
+            ki=pos_ki,
+            kd=pos_kd,
+            target_speed=target_speed,
+            current_speed=current_speed,
+            speed_error=speed_error,
+            speed_kp=speed_kp,
+            speed_ki=speed_ki,
+            speed_kd=speed_kd,
+        )
+    if len(values) == 14:
+        (
+            target,
+            current,
+            error,
+            pos_output,
+            pos_kp,
+            pos_ki,
+            pos_kd,
+            target_speed,
+            current_speed,
+            speed_error,
+            pwm_output,
+            speed_kp,
+            speed_ki,
+            speed_kd,
+        ) = values
+        return Sample(
+            target=target,
+            current=current,
+            error=error,
+            output=pwm_output,
+            pos_output=pos_output,
+            kp=pos_kp,
+            ki=pos_ki,
+            kd=pos_kd,
+            target_speed=target_speed,
+            current_speed=current_speed,
+            speed_error=speed_error,
+            speed_kp=speed_kp,
+            speed_ki=speed_ki,
+            speed_kd=speed_kd,
+        )
     return Sample(*values)
 
 
@@ -46,6 +117,9 @@ def summarize(samples: list[Sample]) -> None:
     errors = [s.error if s.error is not None else s.target - s.current for s in samples]
     currents = [s.current for s in samples]
     outputs = [s.output for s in samples if s.output is not None]
+    target_speeds = [s.target_speed for s in samples if s.target_speed is not None]
+    current_speeds = [s.current_speed for s in samples if s.current_speed is not None]
+    speed_errors = [s.speed_error for s in samples if s.speed_error is not None]
     target = samples[-1].target
     final_error = errors[-1]
     peak_abs_error = max(abs(e) for e in errors)
@@ -60,6 +134,13 @@ def summarize(samples: list[Sample]) -> None:
     print(f"peak_abs_error={peak_abs_error:.3f} overshoot={overshoot:.3f}")
     if outputs:
         print(f"output_min={min(outputs):.3f} output_max={max(outputs):.3f}")
+    if target_speeds and current_speeds and speed_errors:
+        print(
+            "speed "
+            f"target={target_speeds[-1]:.3f} current={current_speeds[-1]:.3f} "
+            f"error={speed_errors[-1]:.3f}"
+        )
+        print(f"speed_error_abs_peak={max(abs(e) for e in speed_errors):.3f}")
     if len(errors) >= 5:
         tail = errors[-min(20, len(errors)) :]
         print(f"tail_error_mean={statistics.fmean(tail):.3f}")
@@ -111,11 +192,13 @@ def main() -> int:
     parser.add_argument("--duration", type=float, default=10.0)
     parser.add_argument("--write", action="store_true", help="Allow sending target/PID commands")
     parser.add_argument("--target", type=int, help="Send T=<target> before capture; requires --write")
-    parser.add_argument("--pid", nargs=3, type=float, metavar=("KP", "KI", "KD"), help="Send P/I/D before capture; requires --write")
+    parser.add_argument("--pid", nargs=3, type=float, metavar=("KP", "KI", "KD"), help="Send indexed PID #1 P/I/D before capture; requires --write")
+    parser.add_argument("--speed-pid", nargs=3, type=float, metavar=("KP", "KI", "KD"), help="Send indexed PID #2 P/I/D before capture; requires --write")
+    parser.add_argument("--max-target-speed", type=int, help="Send M=<speed> before capture; requires --write")
     args = parser.parse_args()
 
-    if (args.target is not None or args.pid is not None) and not args.write:
-        parser.error("--target and --pid require --write")
+    if (args.target is not None or args.pid is not None or args.speed_pid is not None or args.max_target_speed is not None) and not args.write:
+        parser.error("--target, --pid, --speed-pid, and --max-target-speed require --write")
 
     try:
         import serial
@@ -131,9 +214,16 @@ def main() -> int:
         try:
             if args.pid:
                 kp, ki, kd = args.pid
-                write_command(ser, f"P={kp:.6f}")
-                write_command(ser, f"I={ki:.6f}")
-                write_command(ser, f"D={kd:.6f}")
+                write_command(ser, f"1P={kp:.6f}")
+                write_command(ser, f"1I={ki:.6f}")
+                write_command(ser, f"1D={kd:.6f}")
+            if args.speed_pid:
+                kp, ki, kd = args.speed_pid
+                write_command(ser, f"2P={kp:.6f}")
+                write_command(ser, f"2I={ki:.6f}")
+                write_command(ser, f"2D={kd:.6f}")
+            if args.max_target_speed is not None:
+                write_command(ser, f"M={args.max_target_speed}")
             if args.target is not None:
                 write_command(ser, f"T={args.target}")
 

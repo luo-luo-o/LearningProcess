@@ -97,7 +97,6 @@ volatile bool is_exti0_pressed = false;
 volatile bool is_exti2_pressed = false;
 uint32_t stage_id = 0;
 static volatile bool go_to_target = false;
-static uint16_t target_position = 0;  // 1560 nearly a circle
 
 /* ------------------------------------------- */
 
@@ -154,12 +153,15 @@ int main(void)
   Servo_Init(&servo_1, &htim3, TIM_CHANNEL_1, &htim2, 
             L298N_IN1_GPIO_Port, L298N_IN1_Pin, L298N_IN2_GPIO_Port, L298N_IN2_Pin, &huart1);
 
-  // 【修改】直接面向伺服对象配置内部 PID 的初始参数
-  Servo_ConfigPID(&servo_1, 25.0f, 0.0f, 4.0f, 500.0f);
+  // 串级 PID: 位置环输出目标速度，速度环输出 PWM
+  Servo_SetMaxTargetSpeed(&servo_1, 100);
+  Servo_ConfigPID(&servo_1, 0.14f, 0.0f, 0.4f, 0.0f);
+  Servo_ConfigSpeedPID(&servo_1, 80.0f, 5.0f, 0.0f, 500.0f);
 
   static uint32_t oled_show_tick = 0;
   static uint32_t can_send_tick = 0;
   static uint32_t led_tick = 0;
+  static uint32_t vofa_send_tick = 0;
 
   HAL_TIM_Base_Start_IT(&htim4);
   /* USER CODE END 2 */
@@ -181,6 +183,12 @@ int main(void)
     {
 
       can_send_tick = HAL_GetTick();
+    }
+
+    if (HAL_GetTick() - vofa_send_tick >= 50)
+    {
+      Servo_SendTelemetry(&servo_1);
+      vofa_send_tick = HAL_GetTick();
     }
 
     if (HAL_GetTick() - oled_show_tick >= 33) {
@@ -207,36 +215,6 @@ int main(void)
       OLED_ShowNum(2, 8, servo_1.delta_speed, 5);
     }
 
-    OLED_ShowString(4, 1, "Target: ");
-    if (servo_1.target_position < 0) {
-      OLED_ShowChar(4, 9, '-');
-      OLED_ShowNum(4, 10, -servo_1.target_position, 5);
-    }
-    else 
-    {
-      OLED_ShowNum(4, 9, servo_1.target_position, 6);
-    }
-    
-
-    char pid_buf[64]; // 16个字符 + 1个终止符
-
-    // 1. 处理 Kp (保留1位小数)
-    int16_t kp_int = (int16_t)servo_1.pos_pid.Kp;
-    int16_t kp_dec = (int16_t)(servo_1.pos_pid.Kp * 10) % 10;
-
-    // 2. 处理 Ki (保留3位小数，因为它通常很小)
-    int16_t ki_int = (int16_t)servo_1.pos_pid.Ki;
-    int16_t ki_dec = (int16_t)(servo_1.pos_pid.Ki * 100) % 100;
-
-    // 3. 处理 Kd (保留2位小数)
-    int16_t kd_int = (int16_t)servo_1.pos_pid.Kd;
-    int16_t kd_dec = (int16_t)(servo_1.pos_pid.Kd * 100) % 100;
-
-    // 4. 使用基础的 %d 组合字符串
-    // %03d 的意思是：如果小数是 5，显示为 005 而不是 5
-    snprintf(pid_buf, sizeof(pid_buf), "P%d.%d I%d.%02d D%d.%02d", kp_int, kp_dec, ki_int, ki_dec, kd_int, kd_dec);
-    OLED_ShowString(3, 1, pid_buf);
-
 // 【修改】按键 1 逻辑：直接调用高层闭环动作函数
     if (is_exti0_pressed)
     {
@@ -247,8 +225,7 @@ int main(void)
     // 按键 2 逻辑：在线微调依然可以通过访问子成员变量实现
     if (is_exti2_pressed)
     {
-        // ... 原有的闪烁逻辑 ...
-        servo_1.pos_pid.Kp += 0.01f; // 依然支持直接通过子对象微调
+        Servo_SetTargetPos(&servo_1, servo_1.target_position - 10000); // 干净的目标设定
         is_exti2_pressed = false;
     }
 
@@ -677,6 +654,21 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
                 if (rx_buffer[0] == 'T' && rx_buffer[1] == '=') 
                 {
                     Servo_SetTargetPos(&servo_1, atoi((char*)rx_buffer + 2));
+                }
+                else if (rx_buffer[0] == 'M' && rx_buffer[1] == '=')
+                {
+                    Servo_SetMaxTargetSpeed(&servo_1, (int16_t)atoi((char*)rx_buffer + 2));
+                }
+                else if (Servo_ParsePidCommand(&servo_1, (char*)rx_buffer))
+                {
+                }
+                else if (rx_buffer[0] == 'P' && (rx_buffer[1] == 'P' || rx_buffer[1] == 'I' || rx_buffer[1] == 'D') && rx_buffer[2] == '=')
+                {
+                    PID_ParseCommand(&servo_1.pos_pid, (char*)rx_buffer + 1);
+                }
+                else if (rx_buffer[0] == 'V' && (rx_buffer[1] == 'P' || rx_buffer[1] == 'I' || rx_buffer[1] == 'D') && rx_buffer[2] == '=')
+                {
+                    PID_ParseCommand(&servo_1.speed_pid, (char*)rx_buffer + 1);
                 }
                 else
                 {

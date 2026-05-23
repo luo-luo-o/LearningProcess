@@ -1,7 +1,8 @@
 #include "pid.h"
+#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
+#if PID_ENABLE_VOFA
 static int PID_FormatFloat3(char *buf, size_t buf_size, float value)
 {
     int32_t value_int = (int32_t)value;
@@ -21,21 +22,16 @@ static int PID_AppendFloat3(char *buf, size_t buf_size, int offset, float value)
     int written;
     size_t remaining;
 
-    if (offset < 0 || (size_t)offset >= buf_size)
+    if (buf == NULL || offset < 0 || (size_t)offset >= buf_size)
     {
         return offset;
     }
 
     remaining = buf_size - (size_t)offset;
     written = PID_FormatFloat3(&buf[offset], remaining, value);
-    if (written < 0)
+    if (written < 0 || (size_t)written >= remaining)
     {
         return offset;
-    }
-
-    if ((size_t)written >= remaining)
-    {
-        return (int)buf_size - 1;
     }
 
     return offset + written;
@@ -46,31 +42,29 @@ static int PID_AppendText(char *buf, size_t buf_size, int offset, const char *te
     int written;
     size_t remaining;
 
-    if (offset < 0 || (size_t)offset >= buf_size)
+    if (buf == NULL || text == NULL || offset < 0 || (size_t)offset >= buf_size)
     {
         return offset;
     }
 
     remaining = buf_size - (size_t)offset;
     written = snprintf(&buf[offset], remaining, "%s", text);
-    if (written < 0)
+    if (written < 0 || (size_t)written >= remaining)
     {
         return offset;
     }
 
-    if ((size_t)written >= remaining)
-    {
-        return (int)buf_size - 1;
-    }
-
     return offset + written;
 }
+#endif
 
-/**
- * @brief 初始化 PID，并绑定 VOFA+ 串口
- */
-void PID_Init(PID_TypeDef *pid, float Kp, float Ki, float Kd, float output_min, float output_max, float integral_max, UART_HandleTypeDef *huart)
+void PID_Init(PID_TypeDef *pid, float Kp, float Ki, float Kd, float output_min, float output_max, float integral_max)
 {
+    if (pid == NULL)
+    {
+        return;
+    }
+
     pid->Kp = Kp;
     pid->Ki = Ki;
     pid->Kd = Kd;
@@ -83,15 +77,30 @@ void PID_Init(PID_TypeDef *pid, float Kp, float Ki, float Kd, float output_min, 
     pid->Output_Min = output_min;
     pid->Output_Max = output_max;
     pid->Integral_Max = integral_max;
-    
-    pid->vofa_uart = huart; // 绑定串口
 }
 
-/**
- * @brief PID 核心计算
- */
+void PID_Reset(PID_TypeDef *pid)
+{
+    if (pid == NULL)
+    {
+        return;
+    }
+
+    pid->Error = 0.0f;
+    pid->Last_Error = 0.0f;
+    pid->Integral = 0.0f;
+    pid->Output = 0.0f;
+}
+
 float PID_Calc(PID_TypeDef *pid, float target, float current)
 {
+    float output;
+
+    if (pid == NULL)
+    {
+        return 0.0f;
+    }
+
     pid->Target = target;
     pid->Current = current;
     pid->Error = pid->Target - pid->Current;
@@ -100,107 +109,271 @@ float PID_Calc(PID_TypeDef *pid, float target, float current)
     if (pid->Integral > pid->Integral_Max)  pid->Integral = pid->Integral_Max;
     if (pid->Integral < -pid->Integral_Max) pid->Integral = -pid->Integral_Max;
 
-    float output = (pid->Kp * pid->Error) + (pid->Ki * pid->Integral) + (pid->Kd * (pid->Error - pid->Last_Error));
+    output = (pid->Kp * pid->Error) + (pid->Ki * pid->Integral) + (pid->Kd * (pid->Error - pid->Last_Error));
     pid->Last_Error = pid->Error;
 
     if (output > pid->Output_Max) output = pid->Output_Max;
     if (output < pid->Output_Min) output = pid->Output_Min;
 
     pid->Output = output;
-
     return pid->Output;
 }
 
-/**
- * @brief 自动上报数据到 VOFA+ (FireWater 格式) - 禁用浮点打印的高效绕过版本
- * @note  保留 3 位小数，格式：目标值,当前值\n
- */
-void PID_SendToVofa(PID_TypeDef *pid)
+#if PID_ENABLE_VOFA
+static void PID_VofaAppendSeparator(PID_VofaMsg_t *msg)
 {
-    if (pid->vofa_uart == NULL) return;
+    int next_len;
 
-    char tx_buf[160];
-    int len = 0;
-
-    // FireWater: Target,Current,Error,Output,Kp,Ki,Kd
-    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Target);
-    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, ",");
-    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Current);
-    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, ",");
-    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Error);
-    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, ",");
-    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Output);
-    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, ",");
-    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Kp);
-    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, ",");
-    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Ki);
-    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, ",");
-    len = PID_AppendFloat3(tx_buf, sizeof(tx_buf), len, pid->Kd);
-    len = PID_AppendText(tx_buf, sizeof(tx_buf), len, "\n");
-
-    if ((size_t)len >= sizeof(tx_buf))
+    if (msg == NULL || msg->field_count == 0U)
     {
-        len = sizeof(tx_buf) - 1;
-    }
-
-    // 5. 串口发送纯文本
-    HAL_UART_Transmit(pid->vofa_uart, (uint8_t*)tx_buf, len, 10);
-}
-
-/**
- * @brief PID 自解析调参字符串
- * @param cmd_str 传入的清洗后的字符串，如 "P=1.234567" 或 "I=0.500000"
- */
-/**
- * @brief PID 自解析调参字符串（避开 sscanf 匹配 Bug 稳定版本）
- */
-void PID_ParseCommand(PID_TypeDef *pid, char *cmd_str)
-{
-    // 基础合法性校验：防止空指针或错乱格式
-    if (cmd_str == NULL || cmd_str[0] == '\0' || cmd_str[1] != '=') {
         return;
     }
 
-    char type = cmd_str[0];      // 提取 'P', 'I', 'D'
-    char *val_ptr = cmd_str + 2; // 指向数字起始位置
+    next_len = PID_AppendText(msg->buf, msg->size, msg->len, ",");
+    if (next_len == msg->len)
+    {
+        msg->truncated = 1U;
+    }
+    msg->len = next_len;
+}
 
-    // 1. 符号位解析
+void PID_VofaBegin(PID_VofaMsg_t *msg, char *buf, size_t size)
+{
+    if (msg == NULL)
+    {
+        return;
+    }
+
+    msg->buf = buf;
+    msg->size = size;
+    msg->len = 0;
+    msg->field_count = 0U;
+    msg->truncated = 0U;
+
+    if (buf != NULL && size > 0U)
+    {
+        buf[0] = '\0';
+    }
+}
+
+void PID_VofaAppendFloat(PID_VofaMsg_t *msg, float value)
+{
+    int next_len;
+
+    if (msg == NULL || msg->buf == NULL || msg->size == 0U || msg->truncated)
+    {
+        return;
+    }
+
+    PID_VofaAppendSeparator(msg);
+    next_len = PID_AppendFloat3(msg->buf, msg->size, msg->len, value);
+    if (next_len == msg->len)
+    {
+        msg->truncated = 1U;
+    }
+    msg->len = next_len;
+    msg->field_count++;
+}
+
+void PID_VofaAppend(PID_VofaMsg_t *msg, const PID_TypeDef *pid)
+{
+    if (pid == NULL)
+    {
+        return;
+    }
+
+    PID_VofaAppendFloat(msg, pid->Target);
+    PID_VofaAppendFloat(msg, pid->Current);
+    PID_VofaAppendFloat(msg, pid->Error);
+    PID_VofaAppendFloat(msg, pid->Output);
+    PID_VofaAppendFloat(msg, pid->Kp);
+    PID_VofaAppendFloat(msg, pid->Ki);
+    PID_VofaAppendFloat(msg, pid->Kd);
+}
+
+void PID_VofaAppendList(PID_VofaMsg_t *msg, PID_TypeDef *const *pids, size_t pid_count)
+{
+    size_t i;
+
+    if (pids == NULL)
+    {
+        return;
+    }
+
+    for (i = 0U; i < pid_count; i++)
+    {
+        PID_VofaAppend(msg, pids[i]);
+    }
+}
+
+void PID_VofaEnd(PID_VofaMsg_t *msg)
+{
+    int next_len;
+
+    if (msg == NULL || msg->buf == NULL || msg->size == 0U || msg->truncated)
+    {
+        return;
+    }
+
+    next_len = PID_AppendText(msg->buf, msg->size, msg->len, "\n");
+    if (next_len == msg->len)
+    {
+        msg->truncated = 1U;
+    }
+    msg->len = next_len;
+}
+
+int PID_VofaSend(PID_VofaMsg_t *msg, const PID_Comm_t *comm)
+{
+    if (msg == NULL || comm == NULL || comm->write == NULL || msg->buf == NULL || msg->len <= 0 || msg->truncated)
+    {
+        return 0;
+    }
+
+    return comm->write(comm->ctx, (const uint8_t *)msg->buf, (size_t)msg->len);
+}
+
+int PID_VofaSendList(const PID_Comm_t *comm, PID_TypeDef *const *pids, size_t pid_count, char *buf, size_t size)
+{
+    PID_VofaMsg_t msg;
+
+    if (comm == NULL || pids == NULL || buf == NULL || size == 0U || pid_count == 0U)
+    {
+        return 0;
+    }
+
+    PID_VofaBegin(&msg, buf, size);
+    PID_VofaAppendList(&msg, pids, pid_count);
+    PID_VofaEnd(&msg);
+
+    return PID_VofaSend(&msg, comm);
+}
+
+int PID_VofaSendListAuto(const PID_Comm_t *comm, PID_TypeDef *const *pids, size_t pid_count)
+{
+    if (pid_count == 0U || pid_count > PID_VOFA_MAX_AUTO_PID_COUNT)
+    {
+        return 0;
+    }
+
+    {
+        char buf[PID_VOFA_MSG_SIZE(pid_count)];
+
+        return PID_VofaSendList(comm, pids, pid_count, buf, sizeof(buf));
+    }
+}
+#endif
+
+static int PID_ParseFloat(const char *text, float *value)
+{
+    const char *val_ptr = text;
+    int has_digit = 0;
     int sign = 1;
-    if (*val_ptr == '-') {
+    int32_t int_part = 0;
+    float dec_part = 0.0f;
+
+    if (text == NULL || value == NULL)
+    {
+        return 0;
+    }
+
+    if (*val_ptr == '-')
+    {
         sign = -1;
         val_ptr++;
-    } else if (*val_ptr == '+') {
+    }
+    else if (*val_ptr == '+')
+    {
         val_ptr++;
     }
 
-    // 2. 解析整数部分
-    int32_t int_part = 0;
-    while (*val_ptr >= '0' && *val_ptr <= '9') {
+    while (*val_ptr >= '0' && *val_ptr <= '9')
+    {
+        has_digit = 1;
         int_part = int_part * 10 + (*val_ptr - '0');
         val_ptr++;
     }
 
-    // 3. 解析小数部分
-    float dec_part = 0.0f;
-    if (*val_ptr == '.') {
-        val_ptr++;
+    if (*val_ptr == '.')
+    {
         float weight = 0.1f;
-        while (*val_ptr >= '0' && *val_ptr <= '9') {
+
+        val_ptr++;
+        while (*val_ptr >= '0' && *val_ptr <= '9')
+        {
+            has_digit = 1;
             dec_part += (*val_ptr - '0') * weight;
             weight *= 0.1f;
             val_ptr++;
         }
     }
 
-    // 4. 组合最终的高精度浮点数值
-    float final_val = (float)sign * ((float)int_part + dec_part);
-
-    // 5. 安全精确分发
-    if (type == 'P') {
-        pid->Kp = final_val;
-    } else if (type == 'I') {
-        pid->Ki = final_val;
-    } else if (type == 'D') {
-        pid->Kd = final_val;
+    if (!has_digit || *val_ptr != '\0')
+    {
+        return 0;
     }
+
+    *value = (float)sign * ((float)int_part + dec_part);
+    return 1;
 }
+
+int PID_ParseCommand(PID_TypeDef *pid, const char *cmd_str)
+{
+    char type;
+    float final_val;
+
+    if (pid == NULL || cmd_str == NULL || cmd_str[0] == '\0' || cmd_str[1] != '=')
+    {
+        return 0;
+    }
+
+    type = cmd_str[0];
+    if (!PID_ParseFloat(cmd_str + 2, &final_val))
+    {
+        return 0;
+    }
+
+    if (type == 'P')
+    {
+        pid->Kp = final_val;
+        return 1;
+    }
+    else if (type == 'I')
+    {
+        pid->Ki = final_val;
+        return 1;
+    }
+    else if (type == 'D')
+    {
+        pid->Kd = final_val;
+        return 1;
+    }
+
+    return 0;
+}
+
+#if PID_ENABLE_VOFA
+int PID_ParseIndexedCommand(PID_TypeDef *const *pids, size_t pid_count, const char *cmd_str)
+{
+    size_t index = 0U;
+    const char *ptr = cmd_str;
+
+    if (pids == NULL || cmd_str == NULL)
+    {
+        return 0;
+    }
+
+    while (*ptr >= '0' && *ptr <= '9')
+    {
+        index = (index * 10U) + (size_t)(*ptr - '0');
+        ptr++;
+    }
+
+    if (ptr == cmd_str || index == 0U || index > pid_count || pids[index - 1U] == NULL)
+    {
+        return 0;
+    }
+
+    return PID_ParseCommand(pids[index - 1U], ptr);
+}
+#endif

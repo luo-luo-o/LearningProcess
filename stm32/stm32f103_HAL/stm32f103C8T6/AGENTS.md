@@ -23,4 +23,4 @@ Recent history uses short Conventional Commit-style subjects, for example `feat:
 Do not commit `build/`, personal toolchain paths, credentials, or captured device data. After regenerating from CubeMX, review `Core/`, `cmake/stm32cubemx/`, and `stm32f103C8T6.ioc` before mixing generated updates with hand-written driver edits.
 
 ## Agent-Specific Modification Workflow
-For each requested change, first analyze requirements and affected files, then propose a concise plan. Wait for explicit user confirmation before editing. For code changes, try to use subagents for clear, non-overlapping scopes; otherwise keep the change local and state why.
+For each requested change, first analyze requirements and affected files, then propose a concise plan. Wait for explicit user confirmation before editing. For code changes, try to use subagents for clear, non-overlapping scopes; otherwise keep the change local and state why. When using subagents, prefer lower-cost reasoning settings such as `gpt-5.5` with `medium` or `high`, and avoid `xhigh` unless the user explicitly requests it or the task clearly requires it.

@@ -16,13 +16,15 @@ Use `references/project-protocol.md` for the current firmware protocol and sourc
 Expected telemetry is:
 
 ```text
-target,current,error,output,Kp,Ki,Kd
+pos_target,pos_current,pos_error,pos_output,pos_Kp,pos_Ki,pos_Kd,speed_target,speed_current,speed_error,pwm_output,speed_Kp,speed_Ki,speed_Kd
 ```
 
-Legacy firmware may only report:
+Legacy firmware may report:
 
 ```text
 target,current
+target,current,error,output,Kp,Ki,Kd
+pos_target,pos_current,pos_error,speed_target,speed_current,speed_error,pwm_output,pos_Kp,pos_Ki,pos_Kd,speed_Kp,speed_Ki,speed_Kd
 ```
 
 Evaluate response quality from target steps: rise behavior, overshoot, sustained oscillation, steady-state error, and output saturation. Prefer small changes:

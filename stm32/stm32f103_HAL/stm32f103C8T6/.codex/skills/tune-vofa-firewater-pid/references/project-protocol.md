@@ -2,10 +2,10 @@
 
 ## Source Locations
 
-- `Hardware/servo/pid.h`: `PID_TypeDef` stores `Kp`, `Ki`, `Kd`, `Target`, `Current`, `Error`, `Last_Error`, `Integral`, clamps, and UART binding.
-- `Hardware/servo/pid.c`: `PID_Calc`, `PID_SendToVofa`, and `PID_ParseCommand`.
-- `Hardware/servo/servo.c`: `Servo_Task` runs the position loop and calls `PID_SendToVofa`.
-- `Core/Src/main.c`: USART1 setup and interrupt receive command dispatcher.
+- `Hardware/servo/pid.h`: `PID_TypeDef` stores `Kp`, `Ki`, `Kd`, `Target`, `Current`, `Error`, `Last_Error`, `Integral`, and clamps.
+- `Hardware/servo/pid.c`: `PID_Calc`, `PID_Reset`, `PID_ParseCommand`, indexed `PID_ParseIndexedCommand`, and optional PID VOFA list helpers.
+- `Hardware/servo/servo.c`: `Servo_Task` runs cascade position/speed PID; `Servo_SendTelemetry` sends the application-selected PID list through a UART write callback.
+- `Core/Src/main.c`: USART1 setup, interrupt receive command dispatcher, and 20 Hz telemetry scheduling from the main loop.
 
 ## Serial Settings
 
@@ -20,10 +20,10 @@
 Current target protocol:
 
 ```text
-target,current,error,output,Kp,Ki,Kd\n
+pos_target,pos_current,pos_error,pos_output,pos_Kp,pos_Ki,pos_Kd,speed_target,speed_current,speed_error,pwm_output,speed_Kp,speed_Ki,speed_Kd\n
 ```
 
-All channels are decimal text. VOFA+ FireWater should be configured as CSV/plain text with channels in this exact order.
+All channels are decimal text. `pos_output` is the position-loop output and should match `speed_target`. `speed_target` and `speed_current` use encoder pulses per 10 ms `Servo_Task` tick. `pwm_output` is clamped to the PWM ARR range. Telemetry is sent from the main loop at 20 Hz so USART RX interrupts can still accept tuning commands.
 
 ## Accepted Commands
 
@@ -32,10 +32,25 @@ T=<int>\n
 P=<float>\n
 I=<float>\n
 D=<float>\n
+1P=<float>\n
+1I=<float>\n
+1D=<float>\n
+2P=<float>\n
+2I=<float>\n
+2D=<float>\n
+PP=<float>\n
+PI=<float>\n
+PD=<float>\n
+VP=<float>\n
+VI=<float>\n
+VD=<float>\n
+M=<int>\n
 ```
 
-`T=` calls `Servo_SetTargetPos`. `P=`, `I=`, and `D=` are parsed by `PID_ParseCommand`.
+`T=` calls `Servo_SetTargetPos`. Indexed commands tune the application-selected PID list: currently `1P=`, `1I=`, and `1D=` tune the position PID, while `2P=`, `2I=`, and `2D=` tune the speed PID. The index is defined only by the order in which `servo.c` adds PID pointers to the VOFA list, so fixed PIDs can be left out of the tunable list in the application layer. Legacy `P=`, `I=`, and `D=` tune the position loop. `PP=`, `PI=`, and `PD=` also tune the position loop. `VP=`, `VI=`, and `VD=` tune the speed loop. `M=` calls `Servo_SetMaxTargetSpeed`.
 
 ## Safety Notes
 
-PID output is clamped to `[-servo->max_speed, servo->max_speed]`, where `max_speed` comes from the PWM timer ARR. `Integral_Max` is configured through `Servo_ConfigPID`; current startup configuration uses `500.0f`. Make small tuning changes and watch for output saturation, growing oscillation, and unexpected movement.
+The position loop output is clamped to `[-servo->max_target_speed, servo->max_target_speed]` and becomes the speed-loop target. The speed loop output is clamped to `[-servo->max_speed, servo->max_speed]`, where `max_speed` comes from the PWM timer ARR. Make small tuning changes and watch for output saturation, growing oscillation, and unexpected movement.
+
+The servo task suppresses output inside a small settle window: position error within 8 encoder pulses and speed within 1 pulse per 10 ms tick resets the speed PID and drives PWM to zero. `Servo_SetTargetPos` also resets both PID dynamic states so old speed-loop integral does not carry into the next step command.
